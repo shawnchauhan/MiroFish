@@ -10,6 +10,10 @@ flask>=3.0.0
 flask-cors>=6.0.0
 flask-login>=0.6.3
 
+# ============= OAuth =============
+authlib>=1.3.0
+requests>=2.31.0
+
 # ============= LLM 相关 =============
 # OpenAI SDK（统一使用 OpenAI 格式调用 LLM）
 openai>=1.0.0

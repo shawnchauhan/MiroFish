@@ -13,6 +13,7 @@ from flask import Flask, request
 from flask_cors import CORS
 from flask_login import LoginManager
 
+from .auth.oauth import init_oauth, validate_oauth_env
 from .config import Config
 from .db import init_db
 from .utils.logger import setup_logger, get_logger
@@ -41,11 +42,28 @@ def create_app(config_class=Config):
         logger.info("MiroFish Backend 启动中...")
         logger.info("=" * 50)
     
+    # Session configuration
+    app.config['SESSION_COOKIE_HTTPONLY'] = True
+    app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+    app.config['PERMANENT_SESSION_LIFETIME'] = 86400 * 7  # 7 days
+
     # 启用CORS
-    CORS(app, resources={r"/api/*": {"origins": "*"}})
+    frontend_origin = os.environ.get('FRONTEND_URL', 'http://localhost:3000')
+    CORS(app, resources={r"/api/*": {"origins": [frontend_origin]}},
+         supports_credentials=True)
 
     # Initialize database
     init_db()
+
+    # OAuth env validation -- fail loudly if auth is on but creds are missing
+    auth_enabled = os.environ.get('AUTH_ENABLED', 'false').lower() == 'true'
+    if auth_enabled:
+        validate_oauth_env()
+
+    # Initialize OAuth providers
+    registered_providers = init_oauth(app)
+    if should_log_startup and registered_providers:
+        logger.info(f"OAuth providers registered: {', '.join(sorted(registered_providers))}")
 
     # Flask-Login setup
     login_manager = LoginManager()
@@ -77,7 +95,8 @@ def create_app(config_class=Config):
         return response
     
     # 注册蓝图
-    from .api import graph_bp, simulation_bp, report_bp
+    from .api import auth_bp, graph_bp, simulation_bp, report_bp
+    app.register_blueprint(auth_bp, url_prefix='/api/auth')
     app.register_blueprint(graph_bp, url_prefix='/api/graph')
     app.register_blueprint(simulation_bp, url_prefix='/api/simulation')
     app.register_blueprint(report_bp, url_prefix='/api/report')
