@@ -11,8 +11,10 @@ warnings.filterwarnings("ignore", message=".*resource_tracker.*")
 
 from flask import Flask, request
 from flask_cors import CORS
+from flask_login import LoginManager
 
 from .config import Config
+from .db import init_db
 from .utils.logger import setup_logger, get_logger
 
 
@@ -41,6 +43,18 @@ def create_app(config_class=Config):
     
     # 启用CORS
     CORS(app, resources={r"/api/*": {"origins": "*"}})
+
+    # Initialize database
+    init_db()
+
+    # Flask-Login setup
+    login_manager = LoginManager()
+    login_manager.init_app(app)
+
+    @login_manager.user_loader
+    def load_user(user_id):
+        from .models.user import User
+        return User.get_by_id(user_id)
     
     # 注册模拟进程清理函数（确保服务器关闭时终止所有模拟进程）
     from .services.simulation_runner import SimulationRunner
