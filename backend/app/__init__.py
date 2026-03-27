@@ -9,7 +9,7 @@ import warnings
 # 需要在所有其他导入之前设置
 warnings.filterwarnings("ignore", message=".*resource_tracker.*")
 
-from flask import Flask, request
+from flask import Flask, jsonify, request
 from flask_cors import CORS
 from flask_login import LoginManager
 
@@ -80,6 +80,19 @@ def create_app(config_class=Config):
     if should_log_startup:
         logger.info("已注册模拟进程清理函数")
     
+    # Auth middleware -- default-deny for protected routes
+    PUBLIC_PREFIXES = ('/health', '/api/auth/')
+
+    @app.before_request
+    def require_auth():
+        from flask_login import current_user
+        if not auth_enabled:
+            return None
+        if request.path.startswith(PUBLIC_PREFIXES):
+            return None
+        if not current_user.is_authenticated:
+            return jsonify({'error': 'authentication_required'}), 401
+
     # 请求日志中间件
     @app.before_request
     def log_request():
