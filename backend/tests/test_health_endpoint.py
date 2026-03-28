@@ -40,8 +40,13 @@ class TestHealthEndpoint(unittest.TestCase):
         self.assertRegex(human, r'^\d+h \d+m \d+s$')
 
     def test_version_matches_pyproject(self):
+        import tomllib
+        from pathlib import Path
+        pyproject = Path(__file__).resolve().parent.parent / 'pyproject.toml'
+        with open(pyproject, 'rb') as f:
+            expected = tomllib.load(f)['project']['version']
         data = self.client.get('/health').get_json()
-        self.assertEqual(data['version'], '0.1.0')
+        self.assertEqual(data['version'], expected)
 
     def test_timestamp_is_valid_iso8601(self):
         data = self.client.get('/health').get_json()
