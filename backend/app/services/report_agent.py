@@ -13,6 +13,7 @@ import os
 import json
 import time
 import re
+from collections import OrderedDict
 from typing import Dict, Any, List, Optional, Callable
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -1901,13 +1902,22 @@ class ReportManager:
     # Legacy dir; use _reports_dir(report_id) instead
     _LEGACY_REPORTS_DIR = os.path.join(Config.UPLOAD_FOLDER, 'reports')
 
-    # report_id -> user_id registry
-    _user_registry: Dict[str, str] = {}
+    # report_id -> user_id registry (bounded to prevent memory growth)
+    _user_registry: OrderedDict = OrderedDict()
+    _USER_REGISTRY_MAX = 10000
 
     @classmethod
     def register_user(cls, report_id: str, user_id: str):
-        """Register which user owns a report (call from API layer)."""
-        cls._user_registry[report_id] = user_id
+        """Register which user owns a report (call from API layer).
+
+        Will not overwrite an existing entry -- the persisted user_id
+        from meta.json is authoritative.  Prevents IDOR registry
+        corruption.
+        """
+        if report_id not in cls._user_registry:
+            cls._user_registry[report_id] = user_id
+            if len(cls._user_registry) > cls._USER_REGISTRY_MAX:
+                cls._user_registry.popitem(last=False)
 
     @classmethod
     def _reports_base(cls, report_id: str = None, user_id: str = None) -> str:

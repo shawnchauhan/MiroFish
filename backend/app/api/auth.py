@@ -8,6 +8,7 @@ import os
 
 from flask import Blueprint, jsonify, redirect, request, session, url_for
 from flask_login import current_user, login_user, logout_user
+from functools import lru_cache
 
 from ..auth.oauth import oauth
 from ..models.user import User
@@ -22,14 +23,23 @@ def _auth_enabled():
     return os.environ.get('AUTH_ENABLED', 'false').lower() == 'true'
 
 
+_cached_dev_user = None
+
+
 def _dev_user():
-    """Return (and upsert) a deterministic dev user for local work."""
-    return User.upsert(
-        provider='dev',
-        provider_id='dev-local-user',
-        email='dev@localhost',
-        display_name='Dev User',
-    )
+    """Return (and upsert) a deterministic dev user for local work.
+
+    Caches after the first call to avoid a DB write on every status poll.
+    """
+    global _cached_dev_user
+    if _cached_dev_user is None:
+        _cached_dev_user = User.upsert(
+            provider='dev',
+            provider_id='dev-local-user',
+            email='dev@localhost',
+            display_name='Dev User',
+        )
+    return _cached_dev_user
 
 
 # --------------------------------------------------------------------------- #
@@ -43,6 +53,7 @@ def login(provider):
         # In dev mode, just log in as the dev user directly
         user = _dev_user()
         login_user(user)
+        session.permanent = True
         frontend_url = os.environ.get('FRONTEND_URL', 'http://localhost:3000')
         return redirect(frontend_url)
 
@@ -107,6 +118,7 @@ def callback(provider):
         avatar_url=avatar_url,
     )
     login_user(user)
+    session.permanent = True
 
     frontend_url = os.environ.get('FRONTEND_URL', 'http://localhost:3000')
     return redirect(frontend_url)

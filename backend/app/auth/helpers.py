@@ -11,7 +11,7 @@ _DEV_USER_ID = 'dev-local-user'
 
 
 def get_current_user_id():
-    """Return the authenticated user's ID.
+    """Return the authenticated user's ID, or *None* if unauthenticated.
 
     When ``AUTH_ENABLED`` is false, returns a stable dev-user ID so that
     file-scoping still works consistently during local development.
@@ -20,5 +20,8 @@ def get_current_user_id():
 
     if not auth_enabled:
         return _DEV_USER_ID
+
+    if not current_user.is_authenticated:
+        return None
 
     return current_user.id

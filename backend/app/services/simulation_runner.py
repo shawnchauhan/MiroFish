@@ -12,6 +12,7 @@ import threading
 import subprocess
 import signal
 import atexit
+from collections import OrderedDict
 from typing import Dict, Any, List, Optional, Union
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -229,15 +230,26 @@ class SimulationRunner:
     _stderr_files: Dict[str, Any] = {}  # 存储 stderr 文件句柄
 
     # simulation_id -> user_id registry (set by entry-point methods)
-    _user_registry: Dict[str, str] = {}
+    # Bounded to prevent unbounded memory growth.
+    _user_registry: OrderedDict = OrderedDict()
+    _USER_REGISTRY_MAX = 10000
 
     # 图谱记忆更新配置
     _graph_memory_enabled: Dict[str, bool] = {}  # simulation_id -> enabled
 
     @classmethod
     def register_user(cls, simulation_id: str, user_id: str):
-        """Register which user owns a simulation (call from API layer)."""
-        cls._user_registry[simulation_id] = user_id
+        """Register which user owns a simulation (call from API layer).
+
+        Will not overwrite an existing entry -- the persisted user_id
+        loaded from run_state.json is authoritative.  This prevents an
+        attacker from corrupting the registry by accessing another
+        user's simulation_id.
+        """
+        if simulation_id not in cls._user_registry:
+            cls._user_registry[simulation_id] = user_id
+            if len(cls._user_registry) > cls._USER_REGISTRY_MAX:
+                cls._user_registry.popitem(last=False)
 
     @classmethod
     def _sim_base(cls, simulation_id: str) -> str:
