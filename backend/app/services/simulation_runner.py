@@ -261,10 +261,26 @@ class SimulationRunner:
         return state
     
     @classmethod
+    def _find_state_file(cls, simulation_id: str) -> Optional[str]:
+        """Locate run_state.json, checking registry path, legacy, then user dirs."""
+        # 1. Registry / legacy path
+        primary = os.path.join(cls._sim_base(simulation_id), simulation_id, "run_state.json")
+        if os.path.exists(primary):
+            return primary
+        # 2. Scan user-scoped dirs (uploads/{uid}/simulations/{sim_id}/run_state.json)
+        uploads_root = os.path.realpath(Config.UPLOAD_FOLDER)
+        if os.path.isdir(uploads_root):
+            for uid_dir in os.listdir(uploads_root):
+                candidate = os.path.join(uploads_root, uid_dir, 'simulations', simulation_id, 'run_state.json')
+                if os.path.isfile(candidate):
+                    return candidate
+        return None
+
+    @classmethod
     def _load_run_state(cls, simulation_id: str) -> Optional[SimulationRunState]:
         """从文件加载运行状态"""
-        state_file = os.path.join(cls._sim_base(simulation_id), simulation_id, "run_state.json")
-        if not os.path.exists(state_file):
+        state_file = cls._find_state_file(simulation_id)
+        if not state_file:
             return None
         
         try:
@@ -310,7 +326,12 @@ class SimulationRunner:
                     result=a.get("result"),
                     success=a.get("success", True),
                 ))
-            
+
+            # Restore user_id into registry so path resolution survives restart
+            persisted_uid = data.get("user_id")
+            if persisted_uid:
+                cls._user_registry[simulation_id] = persisted_uid
+
             return state
         except Exception as e:
             logger.error(f"加载运行状态失败: {str(e)}")
@@ -322,12 +343,16 @@ class SimulationRunner:
         sim_dir = os.path.join(cls._sim_base(state.simulation_id), state.simulation_id)
         os.makedirs(sim_dir, exist_ok=True)
         state_file = os.path.join(sim_dir, "run_state.json")
-        
+
         data = state.to_detail_dict()
-        
+        # Persist user_id so the registry can be rebuilt after restart
+        uid = cls._user_registry.get(state.simulation_id)
+        if uid:
+            data['user_id'] = uid
+
         with open(state_file, 'w', encoding='utf-8') as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
-        
+
         cls._run_states[state.simulation_id] = state
     
     @classmethod

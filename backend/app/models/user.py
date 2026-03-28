@@ -90,29 +90,35 @@ class User(UserMixin):
                avatar_url=None, db_path=None):
         """Create or update a user on login. Returns the User instance.
 
-        If the user already exists (same provider + provider_id), updates
-        profile fields and last_login_at. Otherwise creates a new record.
+        Uses INSERT ... ON CONFLICT DO UPDATE for atomicity -- avoids the
+        TOCTOU race where two concurrent OAuth callbacks for the same new
+        user both see no existing row and both try to INSERT.
         """
-        existing = cls.get_by_provider(provider, provider_id, db_path)
-        if existing:
-            now = _now()
-            conn = get_connection(db_path)
-            try:
-                conn.execute(
-                    "UPDATE users SET email = ?, display_name = ?, "
-                    "avatar_url = ?, last_login_at = ? WHERE id = ?",
-                    (email, display_name, avatar_url, now, existing.id),
-                )
-                conn.commit()
-            finally:
-                conn.close()
-            existing.email = email
-            existing.display_name = display_name
-            existing.avatar_url = avatar_url
-            existing.last_login_at = now
-            return existing
-        return cls.create(provider, provider_id, email, display_name,
-                          avatar_url, db_path)
+        now = _now()
+        user_id = str(uuid.uuid4())
+        conn = get_connection(db_path)
+        try:
+            conn.execute(
+                "INSERT INTO users (id, provider, provider_id, email, "
+                "display_name, avatar_url, created_at, last_login_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT(provider, provider_id) DO UPDATE SET "
+                "email = excluded.email, "
+                "display_name = excluded.display_name, "
+                "avatar_url = excluded.avatar_url, "
+                "last_login_at = excluded.last_login_at",
+                (user_id, provider, provider_id, email, display_name,
+                 avatar_url, now, now),
+            )
+            conn.commit()
+            # Fetch the actual row (id may differ if conflict updated)
+            row = conn.execute(
+                "SELECT * FROM users WHERE provider = ? AND provider_id = ?",
+                (provider, provider_id),
+            ).fetchone()
+        finally:
+            conn.close()
+        return cls._from_row(row)
 
     # ---- Internal helpers ---------------------------------------------------
 

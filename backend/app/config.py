@@ -19,7 +19,7 @@ else:
 
 class Config:
     """Flask配置类"""
-    
+
     # Flask配置
     SECRET_KEY = os.environ.get('SECRET_KEY', 'mirofish-secret-key')
     DEBUG = os.environ.get('FLASK_DEBUG', 'True').lower() == 'true'

@@ -1916,6 +1916,15 @@ class ReportManager:
         if uid:
             from ..utils.paths import user_reports_dir
             return user_reports_dir(uid)
+        # Scan user-scoped dirs for this report (handles post-restart lookup)
+        if report_id:
+            uploads_root = os.path.realpath(Config.UPLOAD_FOLDER)
+            if os.path.isdir(uploads_root):
+                for uid_dir in os.listdir(uploads_root):
+                    candidate = os.path.join(uploads_root, uid_dir, 'reports', report_id)
+                    if os.path.isdir(candidate):
+                        cls._user_registry[report_id] = uid_dir
+                        return os.path.join(uploads_root, uid_dir, 'reports')
         return cls._LEGACY_REPORTS_DIR
 
     @classmethod
@@ -2443,10 +2452,14 @@ class ReportManager:
     def save_report(cls, report: Report) -> None:
         """保存报告元信息和完整报告"""
         cls._ensure_report_folder(report.report_id)
-        
-        # 保存元信息JSON
+
+        # 保存元信息JSON (include user_id for restart persistence)
+        data = report.to_dict()
+        uid = cls._user_registry.get(report.report_id)
+        if uid:
+            data['user_id'] = uid
         with open(cls._get_report_path(report.report_id), 'w', encoding='utf-8') as f:
-            json.dump(report.to_dict(), f, ensure_ascii=False, indent=2)
+            json.dump(data, f, ensure_ascii=False, indent=2)
         
         # 保存大纲
         if report.outline:
@@ -2474,7 +2487,12 @@ class ReportManager:
         
         with open(path, 'r', encoding='utf-8') as f:
             data = json.load(f)
-        
+
+        # Restore user_id into registry (survives restart)
+        persisted_uid = data.get('user_id')
+        if persisted_uid and report_id not in cls._user_registry:
+            cls._user_registry[report_id] = persisted_uid
+
         # 重建Report对象
         outline = None
         if data.get('outline'):

@@ -254,10 +254,10 @@ def generate_ontology():
         })
         
     except Exception as e:
+        logger.error(f"Internal error: {e}", exc_info=True)
         return jsonify({
             "success": False,
-            "error": str(e),
-            "traceback": traceback.format_exc()
+            "error": "Internal server error"
         }), 500
 
 
@@ -525,10 +525,10 @@ def build_graph():
         })
         
     except Exception as e:
+        logger.error(f"Internal error: {e}", exc_info=True)
         return jsonify({
             "success": False,
-            "error": str(e),
-            "traceback": traceback.format_exc()
+            "error": "Internal server error"
         }), 500
 
 
@@ -590,10 +590,10 @@ def get_graph_data(graph_id: str):
         })
         
     except Exception as e:
+        logger.error(f"Internal error: {e}", exc_info=True)
         return jsonify({
             "success": False,
-            "error": str(e),
-            "traceback": traceback.format_exc()
+            "error": "Internal server error"
         }), 500
 
 
@@ -618,8 +618,8 @@ def delete_graph(graph_id: str):
         })
         
     except Exception as e:
+        logger.error(f"Internal error: {e}", exc_info=True)
         return jsonify({
             "success": False,
-            "error": str(e),
-            "traceback": traceback.format_exc()
+            "error": "Internal server error"
         }), 500
