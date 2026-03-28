@@ -2,7 +2,7 @@
 
 All notable changes to MiroFish will be documented in this file.
 
-## [0.2.0.1] - 2026-03-28
+## [0.2.1.0] - 2026-03-28
 
 ### Added
 - OAuth2 authentication with Google and GitHub providers via Authlib
@@ -14,6 +14,7 @@ All notable changes to MiroFish will be documented in this file.
 - 30-second cache on Zep health checks to prevent DoS amplification
 - Path traversal protection on all user-scoped file operations
 - Dev-mode fallback: deterministic dev user for local development without OAuth
+- Comprehensive project documentation (API.md, ARCHITECTURE.md, CONTRIBUTING.md, SERVICES.md, FRONTEND.md)
 - 44 tests covering user model, route protection, health endpoint, and path helpers
 
 ### Fixed
@@ -24,3 +25,9 @@ All notable changes to MiroFish will be documented in this file.
 - Missing `_register_sim_user` calls on prepare/start simulation paths
 - Missing `_register_report_user` call on generate report path
 - Incorrect loop variable in `get_simulation_history` user registration
+- Ownership verification added to all read endpoints (simulation detail, actions, messages, agent detail)
+- Bare `except` replaced with `except Exception` in simulation history
+- OAuth token exchange failures now logged with exc_info
+- SQLite `busy_timeout` pragma added for concurrent access reliability
+- `_VALID_PROVIDERS` derived from PROVIDERS dict instead of hardcoded
+- Test SECRET_KEY lengthened to satisfy 32-char minimum validation
