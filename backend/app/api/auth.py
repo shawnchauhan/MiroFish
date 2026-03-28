@@ -81,6 +81,8 @@ def callback(provider):
     try:
         token = client.authorize_access_token()
     except Exception:
+        from ..utils.logger import get_logger
+        get_logger('mirofish.auth').warning('OAuth token exchange failed for %s', provider, exc_info=True)
         frontend_url = os.environ.get('FRONTEND_URL', 'http://localhost:3000')
         return redirect(f'{frontend_url}/login?auth_error=token_exchange_failed')
 
