@@ -13,7 +13,7 @@ import os
 import json
 import time
 import re
-import threading as _threading
+import threading
 from collections import OrderedDict
 from typing import Dict, Any, List, Optional, Callable
 from dataclasses import dataclass, field
@@ -1905,7 +1905,7 @@ class ReportManager:
 
     # report_id -> user_id registry (bounded to prevent memory growth)
     _user_registry: OrderedDict = OrderedDict()
-    _user_registry_lock = _threading.Lock()
+    _user_registry_lock = threading.Lock()
     _USER_REGISTRY_MAX = 10000
 
     @classmethod
@@ -1921,6 +1921,23 @@ class ReportManager:
                 cls._user_registry[report_id] = user_id
                 if len(cls._user_registry) > cls._USER_REGISTRY_MAX:
                     cls._user_registry.popitem(last=False)
+
+    @classmethod
+    def verify_owner(cls, report_id: str, user_id: str) -> bool:
+        """Return True if *user_id* is the registered owner of *report_id*.
+
+        Loads from disk if needed so the registry is populated.
+        Returns True when auth is disabled (user_id is None/empty).
+        """
+        if not user_id:
+            return True  # auth disabled
+        # Ensure registry is populated from disk
+        cls.get_report(report_id)
+        with cls._user_registry_lock:
+            owner = cls._user_registry.get(report_id)
+        if not owner:
+            return True  # legacy data with no owner
+        return owner == user_id
 
     @classmethod
     def _reports_base(cls, report_id: str = None, user_id: str = None) -> str:

@@ -12,7 +12,6 @@ import threading
 import subprocess
 import signal
 import atexit
-import threading as _threading
 from collections import OrderedDict
 from typing import Dict, Any, List, Optional, Union
 from dataclasses import dataclass, field
@@ -233,7 +232,7 @@ class SimulationRunner:
     # simulation_id -> user_id registry (set by entry-point methods)
     # Bounded to prevent unbounded memory growth.
     _user_registry: OrderedDict = OrderedDict()
-    _user_registry_lock = _threading.Lock()
+    _user_registry_lock = threading.Lock()
     _USER_REGISTRY_MAX = 10000
 
     # 图谱记忆更新配置
@@ -253,6 +252,23 @@ class SimulationRunner:
                 cls._user_registry[simulation_id] = user_id
                 if len(cls._user_registry) > cls._USER_REGISTRY_MAX:
                     cls._user_registry.popitem(last=False)
+
+    @classmethod
+    def verify_owner(cls, simulation_id: str, user_id: str) -> bool:
+        """Return True if *user_id* is the registered owner of *simulation_id*.
+
+        Loads state from disk if necessary so the registry is populated.
+        Returns True when auth is disabled (user_id is None/empty).
+        """
+        if not user_id:
+            return True  # auth disabled -- no ownership to check
+        # Ensure registry is populated from disk
+        cls.get_run_state(simulation_id)
+        with cls._user_registry_lock:
+            owner = cls._user_registry.get(simulation_id)
+        if not owner:
+            return True  # legacy data with no owner recorded -- allow
+        return owner == user_id
 
     @classmethod
     def _sim_base(cls, simulation_id: str, user_id: str = None) -> str:

@@ -100,6 +100,9 @@ def create_app(config_class=Config):
         from flask_login import current_user
         if not os.environ.get('AUTH_ENABLED', 'false').lower() == 'true':
             return None
+        # Let CORS preflight through so flask-cors can handle it
+        if request.method == 'OPTIONS':
+            return None
         if request.path == '/health' or request.path.startswith('/api/auth/'):
             return None
         if not current_user.is_authenticated:

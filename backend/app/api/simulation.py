@@ -25,6 +25,16 @@ def _register_sim_user(simulation_id: str):
     SimulationRunner.register_user(simulation_id, get_current_user_id())
 
 
+def _require_sim_owner(simulation_id: str):
+    """Register + verify ownership.  Returns a 404 response if the current
+    user does not own *simulation_id*, otherwise None."""
+    uid = get_current_user_id()
+    SimulationRunner.register_user(simulation_id, uid)
+    if not SimulationRunner.verify_owner(simulation_id, uid):
+        return jsonify({"success": False, "error": "Simulation not found"}), 404
+    return None
+
+
 # Interview prompt 优化前缀
 # 添加此前缀可以避免Agent调用工具，直接用文本回复
 INTERVIEW_PROMPT_PREFIX = "结合你的人设、所有的过往记忆与行动，不调用任何工具直接用文本回复我："
@@ -424,7 +434,9 @@ def prepare_simulation():
                 "error": f"模拟不存在: {simulation_id}"
             }), 404
 
-        _register_sim_user(simulation_id)
+        deny = _require_sim_owner(simulation_id)
+        if deny:
+            return deny
 
         # 检查是否强制重新生成
         force_regenerate = data.get('force_regenerate', False)
@@ -814,23 +826,26 @@ def list_simulations():
 
 def _get_report_id_for_simulation(simulation_id: str) -> str:
     """
-    获取 simulation 对应的最新 report_id
-    
-    遍历 reports 目录，找出 simulation_id 匹配的 report，
+    获取 simulation 对应的最新 report_id (user-scoped)
+
+    遍历当前用户的 reports 目录，找出 simulation_id 匹配的 report，
     如果有多个则返回最新的（按 created_at 排序）
-    
+
     Args:
         simulation_id: 模拟ID
-        
+
     Returns:
         report_id 或 None
     """
     import json
     from datetime import datetime
-    
-    # reports 目录路径：backend/uploads/reports
-    # __file__ 是 app/api/simulation.py，需要向上两级到 backend/
-    reports_dir = os.path.join(os.path.dirname(__file__), '../../uploads/reports')
+    from ..utils.paths import user_reports_dir
+
+    uid = get_current_user_id()
+    if uid:
+        reports_dir = user_reports_dir(uid)
+    else:
+        reports_dir = os.path.join(os.path.dirname(__file__), '../../uploads/reports')
     if not os.path.exists(reports_dir):
         return None
     
@@ -934,7 +949,8 @@ def get_simulation_history():
                 recommended_rounds = 0
             
             # 获取运行状态（从 run_state.json 读取用户设置的实际轮数）
-            _register_sim_user(sim.simulation_id)
+            # Registration only -- this list is already user-scoped
+            SimulationRunner.register_user(sim.simulation_id, get_current_user_id())
             run_state = SimulationRunner.get_run_state(sim.simulation_id)
             if run_state:
                 sim_dict["current_round"] = run_state.current_round
@@ -1057,7 +1073,9 @@ def get_simulation_profiles_realtime(simulation_id: str):
     try:
         platform = request.args.get('platform', 'reddit')
 
-        _register_sim_user(simulation_id)
+        deny = _require_sim_owner(simulation_id)
+        if deny:
+            return deny
 
         # 获取模拟目录 (user-scoped)
         from ..utils.paths import user_simulations_dir
@@ -1162,7 +1180,9 @@ def get_simulation_config_realtime(simulation_id: str):
     from datetime import datetime
     
     try:
-        _register_sim_user(simulation_id)
+        deny = _require_sim_owner(simulation_id)
+        if deny:
+            return deny
 
         # 获取模拟目录 (user-scoped)
         from ..utils.paths import user_simulations_dir
@@ -1532,7 +1552,9 @@ def start_simulation():
                 "error": f"模拟不存在: {simulation_id}"
             }), 404
 
-        _register_sim_user(simulation_id)
+        deny = _require_sim_owner(simulation_id)
+        if deny:
+            return deny
 
         force_restarted = False
         
@@ -1669,7 +1691,9 @@ def stop_simulation():
                 "error": "请提供 simulation_id"
             }), 400
         
-        _register_sim_user(simulation_id)
+        deny = _require_sim_owner(simulation_id)
+        if deny:
+            return deny
         run_state = SimulationRunner.stop_simulation(simulation_id)
         
         # 更新模拟状态
@@ -1727,7 +1751,9 @@ def get_run_status(simulation_id: str):
         }
     """
     try:
-        _register_sim_user(simulation_id)
+        deny = _require_sim_owner(simulation_id)
+        if deny:
+            return deny
         run_state = SimulationRunner.get_run_state(simulation_id)
         
         if not run_state:
@@ -1796,7 +1822,9 @@ def get_run_status_detail(simulation_id: str):
         }
     """
     try:
-        _register_sim_user(simulation_id)
+        deny = _require_sim_owner(simulation_id)
+        if deny:
+            return deny
         run_state = SimulationRunner.get_run_state(simulation_id)
         platform_filter = request.args.get('platform')
         
@@ -1887,7 +1915,9 @@ def get_simulation_actions(simulation_id: str):
         agent_id = request.args.get('agent_id', type=int)
         round_num = request.args.get('round_num', type=int)
         
-        _register_sim_user(simulation_id)
+        deny = _require_sim_owner(simulation_id)
+        if deny:
+            return deny
         actions = SimulationRunner.get_actions(
             simulation_id=simulation_id,
             limit=limit,
@@ -1930,7 +1960,9 @@ def get_simulation_timeline(simulation_id: str):
         start_round = request.args.get('start_round', 0, type=int)
         end_round = request.args.get('end_round', type=int)
         
-        _register_sim_user(simulation_id)
+        deny = _require_sim_owner(simulation_id)
+        if deny:
+            return deny
         timeline = SimulationRunner.get_timeline(
             simulation_id=simulation_id,
             start_round=start_round,
@@ -1961,7 +1993,9 @@ def get_agent_stats(simulation_id: str):
     用于前端展示Agent活跃度排行、动作分布等
     """
     try:
-        _register_sim_user(simulation_id)
+        deny = _require_sim_owner(simulation_id)
+        if deny:
+            return deny
         stats = SimulationRunner.get_agent_stats(simulation_id)
         
         return jsonify({
@@ -1995,15 +2029,24 @@ def get_simulation_posts(simulation_id: str):
     返回帖子列表（从SQLite数据库读取）
     """
     try:
+        deny = _require_sim_owner(simulation_id)
+        if deny:
+            return deny
+
         platform = request.args.get('platform', 'reddit')
         limit = request.args.get('limit', 50, type=int)
         offset = request.args.get('offset', 0, type=int)
-        
-        sim_dir = os.path.join(
-            os.path.dirname(__file__),
-            f'../../uploads/simulations/{simulation_id}'
-        )
-        
+
+        from ..utils.paths import user_simulations_dir
+        uid = get_current_user_id()
+        if uid:
+            sim_dir = os.path.join(user_simulations_dir(uid), simulation_id)
+        else:
+            sim_dir = os.path.join(
+                os.path.dirname(__file__),
+                f'../../uploads/simulations/{simulation_id}'
+            )
+
         db_file = f"{platform}_simulation.db"
         db_path = os.path.join(sim_dir, db_file)
         
@@ -2070,14 +2113,23 @@ def get_simulation_comments(simulation_id: str):
         offset: 偏移量
     """
     try:
+        deny = _require_sim_owner(simulation_id)
+        if deny:
+            return deny
+
         post_id = request.args.get('post_id')
         limit = request.args.get('limit', 50, type=int)
         offset = request.args.get('offset', 0, type=int)
-        
-        sim_dir = os.path.join(
-            os.path.dirname(__file__),
-            f'../../uploads/simulations/{simulation_id}'
-        )
+
+        from ..utils.paths import user_simulations_dir
+        uid = get_current_user_id()
+        if uid:
+            sim_dir = os.path.join(user_simulations_dir(uid), simulation_id)
+        else:
+            sim_dir = os.path.join(
+                os.path.dirname(__file__),
+                f'../../uploads/simulations/{simulation_id}'
+            )
         
         db_path = os.path.join(sim_dir, "reddit_simulation.db")
         
@@ -2221,7 +2273,9 @@ def interview_agent():
             }), 400
         
         # 检查环境状态
-        _register_sim_user(simulation_id)
+        deny = _require_sim_owner(simulation_id)
+        if deny:
+            return deny
         if not SimulationRunner.check_env_alive(simulation_id):
             return jsonify({
                 "success": False,
@@ -2356,7 +2410,9 @@ def interview_agents_batch():
                 }), 400
 
         # 检查环境状态
-        _register_sim_user(simulation_id)
+        deny = _require_sim_owner(simulation_id)
+        if deny:
+            return deny
         if not SimulationRunner.check_env_alive(simulation_id):
             return jsonify({
                 "success": False,
@@ -2463,7 +2519,9 @@ def interview_all_agents():
             }), 400
 
         # 检查环境状态
-        _register_sim_user(simulation_id)
+        deny = _require_sim_owner(simulation_id)
+        if deny:
+            return deny
         if not SimulationRunner.check_env_alive(simulation_id):
             return jsonify({
                 "success": False,
@@ -2553,7 +2611,9 @@ def get_interview_history():
                 "error": "请提供 simulation_id"
             }), 400
 
-        _register_sim_user(simulation_id)
+        deny = _require_sim_owner(simulation_id)
+        if deny:
+            return deny
         history = SimulationRunner.get_interview_history(
             simulation_id=simulation_id,
             platform=platform,
@@ -2612,7 +2672,9 @@ def get_env_status():
                 "error": "请提供 simulation_id"
             }), 400
 
-        _register_sim_user(simulation_id)
+        deny = _require_sim_owner(simulation_id)
+        if deny:
+            return deny
         env_alive = SimulationRunner.check_env_alive(simulation_id)
         
         # 获取更详细的状态信息
@@ -2680,7 +2742,9 @@ def close_simulation_env():
                 "error": "请提供 simulation_id"
             }), 400
         
-        _register_sim_user(simulation_id)
+        deny = _require_sim_owner(simulation_id)
+        if deny:
+            return deny
         result = SimulationRunner.close_simulation_env(
             simulation_id=simulation_id,
             timeout=timeout

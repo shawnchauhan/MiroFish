@@ -25,6 +25,16 @@ def _register_report_user(report_id: str):
     ReportManager.register_user(report_id, get_current_user_id())
 
 
+def _require_report_owner(report_id: str):
+    """Register + verify ownership.  Returns a 404 response if the current
+    user does not own *report_id*, otherwise None."""
+    uid = get_current_user_id()
+    ReportManager.register_user(report_id, uid)
+    if not ReportManager.verify_owner(report_id, uid):
+        return jsonify({"success": False, "error": "Report not found"}), 404
+    return None
+
+
 # ============== 报告生成接口 ==============
 
 @report_bp.route('/generate', methods=['POST'])
@@ -115,6 +125,7 @@ def generate_report():
         import uuid
         report_id = f"report_{uuid.uuid4().hex[:12]}"
 
+        # Register ownership for the new report (no verify -- it doesn't exist yet)
         _register_report_user(report_id)
 
         # 创建异步任务
@@ -296,7 +307,9 @@ def get_report(report_id: str):
         }
     """
     try:
-        _register_report_user(report_id)
+        deny = _require_report_owner(report_id)
+        if deny:
+            return deny
         report = ReportManager.get_report(report_id)
         
         if not report:
@@ -404,7 +417,9 @@ def download_report(report_id: str):
     返回Markdown文件
     """
     try:
-        _register_report_user(report_id)
+        deny = _require_report_owner(report_id)
+        if deny:
+            return deny
         report = ReportManager.get_report(report_id)
         
         if not report:
@@ -418,10 +433,19 @@ def download_report(report_id: str):
         if not os.path.exists(md_path):
             # 如果MD文件不存在，生成一个临时文件
             import tempfile
+            from flask import after_this_request
             with tempfile.NamedTemporaryFile(mode='w', suffix='.md', delete=False) as f:
                 f.write(report.markdown_content)
                 temp_path = f.name
-            
+
+            @after_this_request
+            def _cleanup(response):
+                try:
+                    os.unlink(temp_path)
+                except OSError:
+                    pass
+                return response
+
             return send_file(
                 temp_path,
                 as_attachment=True,
@@ -446,7 +470,9 @@ def download_report(report_id: str):
 def delete_report(report_id: str):
     """删除报告"""
     try:
-        _register_report_user(report_id)
+        deny = _require_report_owner(report_id)
+        if deny:
+            return deny
         success = ReportManager.delete_report(report_id)
         
         if not success:
@@ -585,7 +611,9 @@ def get_report_progress(report_id: str):
         }
     """
     try:
-        _register_report_user(report_id)
+        deny = _require_report_owner(report_id)
+        if deny:
+            return deny
         progress = ReportManager.get_progress(report_id)
         
         if not progress:
@@ -633,7 +661,9 @@ def get_report_sections(report_id: str):
         }
     """
     try:
-        _register_report_user(report_id)
+        deny = _require_report_owner(report_id)
+        if deny:
+            return deny
         sections = ReportManager.get_generated_sections(report_id)
         
         # 获取报告状态
@@ -673,7 +703,9 @@ def get_single_section(report_id: str, section_index: int):
         }
     """
     try:
-        _register_report_user(report_id)
+        deny = _require_report_owner(report_id)
+        if deny:
+            return deny
         section_path = ReportManager._get_section_path(report_id, section_index)
         
         if not os.path.exists(section_path):
@@ -797,7 +829,9 @@ def get_agent_log(report_id: str):
     try:
         from_line = request.args.get('from_line', 0, type=int)
         
-        _register_report_user(report_id)
+        deny = _require_report_owner(report_id)
+        if deny:
+            return deny
         log_data = ReportManager.get_agent_log(report_id, from_line=from_line)
         
         return jsonify({
@@ -828,7 +862,9 @@ def stream_agent_log(report_id: str):
         }
     """
     try:
-        _register_report_user(report_id)
+        deny = _require_report_owner(report_id)
+        if deny:
+            return deny
         logs = ReportManager.get_agent_log_stream(report_id)
         
         return jsonify({
@@ -879,7 +915,9 @@ def get_console_log(report_id: str):
     try:
         from_line = request.args.get('from_line', 0, type=int)
         
-        _register_report_user(report_id)
+        deny = _require_report_owner(report_id)
+        if deny:
+            return deny
         log_data = ReportManager.get_console_log(report_id, from_line=from_line)
         
         return jsonify({
@@ -910,7 +948,9 @@ def stream_console_log(report_id: str):
         }
     """
     try:
-        _register_report_user(report_id)
+        deny = _require_report_owner(report_id)
+        if deny:
+            return deny
         logs = ReportManager.get_console_log_stream(report_id)
         
         return jsonify({

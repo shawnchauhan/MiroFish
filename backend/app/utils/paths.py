@@ -23,26 +23,37 @@ def _safe_resolve(base, *parts):
     return joined
 
 
+def _require_user_id(user_id):
+    """Raise ValueError if user_id is empty/None."""
+    if not user_id or not str(user_id).strip():
+        raise ValueError('user_id must not be empty')
+
+
 def user_upload_dir(user_id):
     """Root upload directory for a given user."""
+    _require_user_id(user_id)
     return _safe_resolve(_UPLOAD_ROOT, user_id)
 
 
 def user_projects_dir(user_id):
     """Projects directory: uploads/{user_id}/projects/"""
+    _require_user_id(user_id)
     return _safe_resolve(_UPLOAD_ROOT, user_id, 'projects')
 
 
 def user_simulations_dir(user_id):
     """Simulations directory: uploads/{user_id}/simulations/"""
+    _require_user_id(user_id)
     return _safe_resolve(_UPLOAD_ROOT, user_id, 'simulations')
 
 
 def user_run_states_dir(user_id):
     """Simulation run-state directory: uploads/{user_id}/run_states/"""
+    _require_user_id(user_id)
     return _safe_resolve(_UPLOAD_ROOT, user_id, 'run_states')
 
 
 def user_reports_dir(user_id):
     """Reports directory: uploads/{user_id}/reports/"""
+    _require_user_id(user_id)
     return _safe_resolve(_UPLOAD_ROOT, user_id, 'reports')
