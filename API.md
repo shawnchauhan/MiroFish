@@ -13,6 +13,97 @@ All endpoints return JSON with the structure:
 
 ---
 
+## Auth API (`/api/auth`)
+
+### Check Auth Status
+
+```
+GET /api/auth/status
+```
+
+Returns whether auth is enabled and current user info.
+
+**Response:**
+```json
+{
+  "auth_enabled": true,
+  "authenticated": true,
+  "user": {
+    "id": "uuid",
+    "email": "user@example.com",
+    "display_name": "Jane Doe",
+    "avatar_url": "https://...",
+    "provider": "google"
+  }
+}
+```
+
+When `AUTH_ENABLED=false`, returns `auth_enabled: false` with a dev user.
+
+---
+
+### Login
+
+```
+POST /api/auth/login/<provider>
+```
+
+Redirects to OAuth provider authorization page. Provider: `google` or `github`.
+
+In dev mode (`AUTH_ENABLED=false`), logs in as dev user and redirects to frontend.
+
+---
+
+### OAuth Callback
+
+```
+GET /api/auth/callback/<provider>
+```
+
+Receives OAuth callback, upserts user in SQLite, sets session, redirects to frontend.
+
+---
+
+### Logout
+
+```
+POST /api/auth/logout
+```
+
+Clears session. Returns `{"success": true}`.
+
+---
+
+### Get Current User
+
+```
+GET /api/auth/me
+```
+
+Returns current user profile. 401 if not authenticated.
+
+---
+
+## Health Check
+
+```
+GET /api/health
+```
+
+**Response:**
+```json
+{
+  "status": "healthy",
+  "version": "0.2.0.1",
+  "auth_enabled": false,
+  "zep_connected": true
+}
+```
+
+Zep connectivity is cached for 30 seconds.
+
+---
+
 ## Graph API (`/api/graph`)
 
 ### Generate Ontology

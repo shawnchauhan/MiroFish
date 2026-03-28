@@ -47,6 +47,42 @@ MiroFish is a full-stack application that takes seed documents (news articles, r
 | **Package Management** | npm (frontend), uv (backend) | Dependency management |
 | **Deployment** | Docker, docker-compose | Containerized deployment |
 
+## Authentication & User Isolation
+
+MiroFish supports OAuth2 authentication with Google and GitHub providers (added in v0.2.0.0).
+
+```
+┌──────────┐    OAuth2     ┌───────────────┐
+│ Frontend │ ─────────────→│ Google/GitHub  │
+│ /login   │←──callback────│ OAuth Provider │
+└────┬─────┘               └───────────────┘
+     │ session cookie
+┌────▼─────────────────────────────────────┐
+│ Flask Backend                            │
+│  ┌─────────────┐  ┌──────────────────┐   │
+│  │ Flask-Login  │  │ Authlib (OAuth)  │   │
+│  │ (sessions)   │  │ (Google/GitHub)  │   │
+│  └──────┬──────┘  └──────────────────┘   │
+│         │                                │
+│  ┌──────▼──────┐                         │
+│  │ SQLite DB   │  users table            │
+│  │ (data/      │  (provider, email,      │
+│  │  users.db)  │   display_name, etc.)   │
+│  └─────────────┘                         │
+└──────────────────────────────────────────┘
+```
+
+**User-scoped file storage:** All file operations (projects, simulations, reports) are scoped by `user_id`:
+```
+uploads/{user_id}/projects/...
+uploads/{user_id}/simulations/...
+uploads/{user_id}/reports/...
+```
+
+**Dev mode:** When `AUTH_ENABLED=false` (default), a deterministic dev user ID is used. No login required, but files are still scoped consistently.
+
+**Path traversal protection:** `_safe_resolve()` in `utils/paths.py` validates all resolved paths stay within the `uploads/` base directory.
+
 ## Project Structure
 
 ```
@@ -92,12 +128,18 @@ MiroFish/
 │   ├── app/
 │   │   ├── __init__.py       # Flask app factory: CORS, blueprints, cleanup hooks
 │   │   ├── config.py         # Centralized config from .env (LLM, Zep, OASIS, uploads)
+│   │   ├── auth/             # Authentication
+│   │   │   ├── oauth.py      # Google/GitHub OAuth2 provider registration
+│   │   │   └── helpers.py    # get_current_user_id() — user-scoped file access
 │   │   ├── api/              # Flask Blueprints (REST endpoints)
-│   │   │   ├── __init__.py   # Registers graph_bp, simulation_bp, report_bp
+│   │   │   ├── __init__.py   # Registers auth_bp, graph_bp, simulation_bp, report_bp
+│   │   │   ├── auth.py       # /api/auth/* — login, callback, logout, status
 │   │   │   ├── graph.py      # /api/graph/* — ontology, build, task status, graph data, project CRUD
 │   │   │   ├── simulation.py # /api/simulation/* — create, prepare, start, stop, status, interview, profiles
 │   │   │   └── report.py     # /api/report/* — generate, status, get, chat, sections, agent-log, download
+│   │   ├── db.py             # SQLite connection factory (WAL mode, users.db)
 │   │   ├── models/           # Data models (in-memory + file-persisted)
+│   │   │   ├── user.py       # User: SQLite-backed OAuth user model (Flask-Login)
 │   │   │   ├── project.py    # Project: status machine (created→ontology→building→completed)
 │   │   │   └── task.py       # TaskManager: thread-safe singleton for async task tracking
 │   │   ├── services/         # Core business logic
@@ -116,6 +158,7 @@ MiroFish/
 │   │   └── utils/
 │   │       ├── llm_client.py    # OpenAI-compatible LLM wrapper
 │   │       ├── file_parser.py   # PDF/MD/TXT text extraction (PyMuPDF)
+│   │       ├── paths.py         # User-scoped path helpers with traversal protection
 │   │       ├── zep_paging.py    # Paginated fetch for Zep nodes/edges
 │   │       ├── logger.py        # Structured logging setup
 │   │       └── retry.py         # Retry utilities
@@ -348,3 +391,10 @@ docker compose up -d  # Single container, ports 3000 + 5001
 ```
 
 Both require `.env` with `LLM_API_KEY` and `ZEP_API_KEY`.
+
+## Further Reading
+
+- [API.md](API.md) -- Complete REST endpoint reference with request/response examples
+- [SERVICES.md](SERVICES.md) -- Deep dive into backend services, data models, and utilities
+- [FRONTEND.md](FRONTEND.md) -- Vue component hierarchy, state management, and data flow
+- [CONTRIBUTING.md](CONTRIBUTING.md) -- Development setup and contribution guidelines
