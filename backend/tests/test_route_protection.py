@@ -19,7 +19,7 @@ from app.db import init_db
 
 class _TestConfig(Config):
     TESTING = True
-    SECRET_KEY = 'test-secret'
+    SECRET_KEY = 'test-secret-key-that-is-at-least-32-characters-long'
 
 
 class TestRouteProtectionAuthEnabled(unittest.TestCase):
