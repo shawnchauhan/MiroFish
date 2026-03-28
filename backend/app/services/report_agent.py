@@ -2587,9 +2587,9 @@ class ReportManager:
     @classmethod
     def list_reports(cls, simulation_id: Optional[str] = None, limit: int = 50, user_id: str = None) -> List[Report]:
         """列出报告"""
-        cls._ensure_reports_dir()
-
         base = cls._reports_base(user_id=user_id)
+        if not os.path.isdir(base):
+            return []
         reports = []
         for item in os.listdir(base):
             item_path = os.path.join(base, item)
