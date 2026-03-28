@@ -49,7 +49,7 @@ MiroFish is a full-stack application that takes seed documents (news articles, r
 
 ## Authentication & User Isolation
 
-MiroFish supports OAuth2 authentication with Google and GitHub providers (added in v0.2.0.0).
+MiroFish supports OAuth2 authentication with Google and GitHub providers (added in v0.2.1.0).
 
 ```
 ┌──────────┐    OAuth2     ┌───────────────┐

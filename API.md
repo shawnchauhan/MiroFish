@@ -94,7 +94,7 @@ GET /api/health
 ```json
 {
   "status": "healthy",
-  "version": "0.2.0.1",
+  "version": "0.2.1.1",
   "auth_enabled": false,
   "zep_connected": true
 }
