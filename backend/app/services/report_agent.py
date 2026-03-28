@@ -1911,20 +1911,11 @@ class ReportManager:
 
     @classmethod
     def _reports_base(cls, report_id: str = None, user_id: str = None) -> str:
-        """Get reports base dir, resolving user from registry if available."""
+        """Get reports base dir, resolving user from registry. No cross-user scan."""
         uid = user_id or (cls._user_registry.get(report_id) if report_id else None)
         if uid:
             from ..utils.paths import user_reports_dir
             return user_reports_dir(uid)
-        # Scan user-scoped dirs for this report (handles post-restart lookup)
-        if report_id:
-            uploads_root = os.path.realpath(Config.UPLOAD_FOLDER)
-            if os.path.isdir(uploads_root):
-                for uid_dir in os.listdir(uploads_root):
-                    candidate = os.path.join(uploads_root, uid_dir, 'reports', report_id)
-                    if os.path.isdir(candidate):
-                        cls._user_registry[report_id] = uid_dir
-                        return os.path.join(uploads_root, uid_dir, 'reports')
         return cls._LEGACY_REPORTS_DIR
 
     @classmethod

@@ -262,18 +262,10 @@ class SimulationRunner:
     
     @classmethod
     def _find_state_file(cls, simulation_id: str) -> Optional[str]:
-        """Locate run_state.json, checking registry path, legacy, then user dirs."""
-        # 1. Registry / legacy path
+        """Locate run_state.json via registry or legacy path. No cross-user scan."""
         primary = os.path.join(cls._sim_base(simulation_id), simulation_id, "run_state.json")
         if os.path.exists(primary):
             return primary
-        # 2. Scan user-scoped dirs (uploads/{uid}/simulations/{sim_id}/run_state.json)
-        uploads_root = os.path.realpath(Config.UPLOAD_FOLDER)
-        if os.path.isdir(uploads_root):
-            for uid_dir in os.listdir(uploads_root):
-                candidate = os.path.join(uploads_root, uid_dir, 'simulations', simulation_id, 'run_state.json')
-                if os.path.isfile(candidate):
-                    return candidate
         return None
 
     @classmethod

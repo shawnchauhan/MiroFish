@@ -68,7 +68,11 @@ def callback(provider):
         return jsonify({'error': f'Provider {provider} is not configured'}), 400
 
     # Exchange code for token -- Authlib validates the state parameter
-    token = client.authorize_access_token()
+    try:
+        token = client.authorize_access_token()
+    except Exception:
+        frontend_url = os.environ.get('FRONTEND_URL', 'http://localhost:3000')
+        return redirect(f'{frontend_url}/login?auth_error=token_exchange_failed')
 
     # Fetch user profile from the provider
     if provider == 'google':
