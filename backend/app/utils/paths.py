@@ -16,6 +16,7 @@ def _safe_resolve(base, *parts):
 
     Raises ValueError on path traversal attempts.
     """
+    base = os.path.realpath(base)
     joined = os.path.realpath(os.path.join(base, *parts))
     if not joined.startswith(base + os.sep) and joined != base:
         raise ValueError(f'Path traversal detected: {joined}')

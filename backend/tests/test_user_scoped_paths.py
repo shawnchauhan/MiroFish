@@ -59,8 +59,10 @@ class TestPathTraversal(unittest.TestCase):
             _safe_resolve('/tmp/uploads', '../../../root')
 
     def test_safe_path_ok(self):
+        import os
         result = _safe_resolve('/tmp/uploads', 'user-1', 'projects')
-        self.assertEqual(result, '/tmp/uploads/user-1/projects')
+        expected = os.path.realpath('/tmp/uploads/user-1/projects')
+        self.assertEqual(result, expected)
 
 
 class TestCrossUserIsolation(unittest.TestCase):
