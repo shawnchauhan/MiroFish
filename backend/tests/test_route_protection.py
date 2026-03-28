@@ -31,22 +31,28 @@ class TestRouteProtectionAuthEnabled(unittest.TestCase):
         self.db_path = self._tmp.name
         init_db(self.db_path)
 
-        env = {
+        self._env_patcher = patch.dict(os.environ, {
             'AUTH_ENABLED': 'true',
             # Provide dummy creds so validate_oauth_env doesn't raise
             'GOOGLE_CLIENT_ID': 'fake-id',
             'GOOGLE_CLIENT_SECRET': 'fake-secret',
-        }
-        with patch.dict(os.environ, env):
-            self.app = create_app(_TestConfig)
+        })
+        self._env_patcher.start()
+        self.app = create_app(_TestConfig)
         self.client = self.app.test_client()
 
     def tearDown(self):
+        self._env_patcher.stop()
         os.unlink(self.db_path)
 
     def test_health_is_public(self):
         resp = self.client.get('/health')
         self.assertEqual(resp.status_code, 200)
+
+    def test_health_prefix_not_public(self):
+        """Paths like /healthcheck should NOT be treated as public."""
+        resp = self.client.get('/healthcheck')
+        self.assertNotEqual(resp.status_code, 200)
 
     def test_auth_status_is_public(self):
         resp = self.client.get('/api/auth/status')
@@ -81,12 +87,13 @@ class TestRouteProtectionAuthDisabled(unittest.TestCase):
         self.db_path = self._tmp.name
         init_db(self.db_path)
 
-        env = {'AUTH_ENABLED': 'false'}
-        with patch.dict(os.environ, env):
-            self.app = create_app(_TestConfig)
+        self._env_patcher = patch.dict(os.environ, {'AUTH_ENABLED': 'false'})
+        self._env_patcher.start()
+        self.app = create_app(_TestConfig)
         self.client = self.app.test_client()
 
     def tearDown(self):
+        self._env_patcher.stop()
         os.unlink(self.db_path)
 
     def test_health_accessible(self):

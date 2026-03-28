@@ -81,14 +81,12 @@ def create_app(config_class=Config):
         logger.info("已注册模拟进程清理函数")
     
     # Auth middleware -- default-deny for protected routes
-    PUBLIC_PREFIXES = ('/health', '/api/auth/')
-
     @app.before_request
     def require_auth():
         from flask_login import current_user
-        if not auth_enabled:
+        if not os.environ.get('AUTH_ENABLED', 'false').lower() == 'true':
             return None
-        if request.path.startswith(PUBLIC_PREFIXES):
+        if request.path == '/health' or request.path.startswith('/api/auth/'):
             return None
         if not current_user.is_authenticated:
             return jsonify({'error': 'authentication_required'}), 401
