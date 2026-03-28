@@ -65,9 +65,11 @@ def create_app(config_class=Config):
     auth_enabled = os.environ.get('AUTH_ENABLED', 'false').lower() == 'true'
     if auth_enabled:
         validate_oauth_env()
-        if app.config.get('SECRET_KEY') == 'mirofish-secret-key':
+        secret = app.config.get('SECRET_KEY', '')
+        if secret == 'mirofish-secret-key' or len(secret) < 32:
             raise RuntimeError(
-                "AUTH_ENABLED=true but SECRET_KEY is the insecure default. "
+                "AUTH_ENABLED=true but SECRET_KEY is missing or too short "
+                "(minimum 32 characters). "
                 "Set a strong SECRET_KEY in your .env file. "
                 "Generate one with: python -c \"import secrets; print(secrets.token_hex(32))\""
             )

@@ -13,6 +13,7 @@ import os
 import json
 import time
 import re
+import threading as _threading
 from collections import OrderedDict
 from typing import Dict, Any, List, Optional, Callable
 from dataclasses import dataclass, field
@@ -1904,6 +1905,7 @@ class ReportManager:
 
     # report_id -> user_id registry (bounded to prevent memory growth)
     _user_registry: OrderedDict = OrderedDict()
+    _user_registry_lock = _threading.Lock()
     _USER_REGISTRY_MAX = 10000
 
     @classmethod
@@ -1914,15 +1916,24 @@ class ReportManager:
         from meta.json is authoritative.  Prevents IDOR registry
         corruption.
         """
-        if report_id not in cls._user_registry:
-            cls._user_registry[report_id] = user_id
-            if len(cls._user_registry) > cls._USER_REGISTRY_MAX:
-                cls._user_registry.popitem(last=False)
+        with cls._user_registry_lock:
+            if report_id not in cls._user_registry:
+                cls._user_registry[report_id] = user_id
+                if len(cls._user_registry) > cls._USER_REGISTRY_MAX:
+                    cls._user_registry.popitem(last=False)
 
     @classmethod
     def _reports_base(cls, report_id: str = None, user_id: str = None) -> str:
-        """Get reports base dir, resolving user from registry. No cross-user scan."""
-        uid = user_id or (cls._user_registry.get(report_id) if report_id else None)
+        """Get reports base dir.
+
+        Prefer the explicit *user_id* when available (passed from the
+        request context).  Fall back to the in-memory registry, then to
+        the legacy flat directory.
+        """
+        uid = user_id
+        if not uid and report_id:
+            with cls._user_registry_lock:
+                uid = cls._user_registry.get(report_id)
         if uid:
             from ..utils.paths import user_reports_dir
             return user_reports_dir(uid)
@@ -2456,7 +2467,8 @@ class ReportManager:
 
         # 保存元信息JSON (include user_id for restart persistence)
         data = report.to_dict()
-        uid = cls._user_registry.get(report.report_id)
+        with cls._user_registry_lock:
+            uid = cls._user_registry.get(report.report_id)
         if uid:
             data['user_id'] = uid
         with open(cls._get_report_path(report.report_id), 'w', encoding='utf-8') as f:
@@ -2491,8 +2503,10 @@ class ReportManager:
 
         # Restore user_id into registry (survives restart)
         persisted_uid = data.get('user_id')
-        if persisted_uid and report_id not in cls._user_registry:
-            cls._user_registry[report_id] = persisted_uid
+        if persisted_uid:
+            with cls._user_registry_lock:
+                if report_id not in cls._user_registry:
+                    cls._user_registry[report_id] = persisted_uid
 
         # 重建Report对象
         outline = None

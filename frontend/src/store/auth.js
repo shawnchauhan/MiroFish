@@ -32,7 +32,10 @@ export async function checkAuth() {
       authState.authenticated = data.authenticated
       authState.user = data.user
     } catch {
-      // If the request fails, assume not authenticated
+      // If the request fails, assume auth is required and user is not
+      // authenticated. Setting authEnabled=true prevents the guard from
+      // silently letting unauthenticated users through on network errors.
+      authState.authEnabled = true
       authState.authenticated = false
       authState.user = null
     } finally {

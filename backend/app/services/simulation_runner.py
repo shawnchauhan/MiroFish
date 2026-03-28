@@ -12,6 +12,7 @@ import threading
 import subprocess
 import signal
 import atexit
+import threading as _threading
 from collections import OrderedDict
 from typing import Dict, Any, List, Optional, Union
 from dataclasses import dataclass, field
@@ -232,6 +233,7 @@ class SimulationRunner:
     # simulation_id -> user_id registry (set by entry-point methods)
     # Bounded to prevent unbounded memory growth.
     _user_registry: OrderedDict = OrderedDict()
+    _user_registry_lock = _threading.Lock()
     _USER_REGISTRY_MAX = 10000
 
     # 图谱记忆更新配置
@@ -246,15 +248,24 @@ class SimulationRunner:
         attacker from corrupting the registry by accessing another
         user's simulation_id.
         """
-        if simulation_id not in cls._user_registry:
-            cls._user_registry[simulation_id] = user_id
-            if len(cls._user_registry) > cls._USER_REGISTRY_MAX:
-                cls._user_registry.popitem(last=False)
+        with cls._user_registry_lock:
+            if simulation_id not in cls._user_registry:
+                cls._user_registry[simulation_id] = user_id
+                if len(cls._user_registry) > cls._USER_REGISTRY_MAX:
+                    cls._user_registry.popitem(last=False)
 
     @classmethod
-    def _sim_base(cls, simulation_id: str) -> str:
-        """Return the base dir for a simulation, resolving user_id from registry."""
-        uid = cls._user_registry.get(simulation_id)
+    def _sim_base(cls, simulation_id: str, user_id: str = None) -> str:
+        """Return the base dir for a simulation.
+
+        Prefer the explicit *user_id* when available (passed from the
+        request context).  Fall back to the in-memory registry, then to
+        the legacy flat directory.
+        """
+        uid = user_id
+        if not uid:
+            with cls._user_registry_lock:
+                uid = cls._user_registry.get(simulation_id)
         if uid:
             return cls._run_state_dir(uid)
         # Fallback to legacy path if not registered
@@ -334,7 +345,8 @@ class SimulationRunner:
             # Restore user_id into registry so path resolution survives restart
             persisted_uid = data.get("user_id")
             if persisted_uid:
-                cls._user_registry[simulation_id] = persisted_uid
+                with cls._user_registry_lock:
+                    cls._user_registry[simulation_id] = persisted_uid
 
             return state
         except Exception as e:
@@ -350,7 +362,8 @@ class SimulationRunner:
 
         data = state.to_detail_dict()
         # Persist user_id so the registry can be rebuilt after restart
-        uid = cls._user_registry.get(state.simulation_id)
+        with cls._user_registry_lock:
+            uid = cls._user_registry.get(state.simulation_id)
         if uid:
             data['user_id'] = uid
 
