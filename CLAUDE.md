@@ -19,7 +19,7 @@ npm run dev            # Start both servers (localhost:3000 + :5001)
 - **LLM:** OpenAI-compatible API (configured via .env)
 - **Knowledge Graph:** Zep Cloud (GraphRAG)
 - **Simulation:** OASIS (camel-ai/oasis)
-- **No database** — file-based persistence in `backend/uploads/`
+- **Database:** SQLite for user auth (`backend/data/users.db`), file-based persistence for projects/simulations/reports in `backend/uploads/`
 
 ## Architecture
 
@@ -69,14 +69,16 @@ Long operations return a `task_id` immediately. A background thread does the wor
 All go through `backend/app/utils/llm_client.py` — wraps OpenAI SDK, strips `<think>` tags from reasoning models, supports JSON mode.
 
 ### File persistence
-Each project/simulation/report gets a directory under `backend/uploads/`. No SQL.
+Each project/simulation/report gets a directory under `backend/uploads/{user_id}/`. User accounts stored in SQLite (`backend/data/users.db`).
 
 ### Simulation subprocess
 OASIS runs as a separate process (`backend/scripts/run_*.py`). IPC via file-based commands in a shared directory.
 
 ## Running Tests
 
-No test framework is currently configured.
+```bash
+cd backend && python -m pytest tests/ -v
+```
 
 ## Environment Variables
 

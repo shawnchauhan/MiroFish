@@ -842,10 +842,7 @@ def _get_report_id_for_simulation(simulation_id: str) -> str:
     from ..utils.paths import user_reports_dir
 
     uid = get_current_user_id()
-    if uid:
-        reports_dir = user_reports_dir(uid)
-    else:
-        reports_dir = os.path.join(os.path.dirname(__file__), '../../uploads/reports')
+    reports_dir = user_reports_dir(uid)
     if not os.path.exists(reports_dir):
         return None
     
@@ -976,7 +973,8 @@ def get_simulation_history():
             sim_dict["report_id"] = _get_report_id_for_simulation(sim.simulation_id)
             
             # 添加版本号
-            sim_dict["version"] = "v1.0.2"
+            from flask import current_app
+            sim_dict["version"] = f"v{current_app.config.get('_APP_VERSION', 'unknown')}"
             
             # 格式化日期
             try:
@@ -2039,17 +2037,11 @@ def get_simulation_posts(simulation_id: str):
 
         from ..utils.paths import user_simulations_dir
         uid = get_current_user_id()
-        if uid:
-            sim_dir = os.path.join(user_simulations_dir(uid), simulation_id)
-        else:
-            sim_dir = os.path.join(
-                os.path.dirname(__file__),
-                f'../../uploads/simulations/{simulation_id}'
-            )
+        sim_dir = os.path.join(user_simulations_dir(uid), simulation_id)
 
         db_file = f"{platform}_simulation.db"
         db_path = os.path.join(sim_dir, db_file)
-        
+
         if not os.path.exists(db_path):
             return jsonify({
                 "success": True,
@@ -2123,14 +2115,8 @@ def get_simulation_comments(simulation_id: str):
 
         from ..utils.paths import user_simulations_dir
         uid = get_current_user_id()
-        if uid:
-            sim_dir = os.path.join(user_simulations_dir(uid), simulation_id)
-        else:
-            sim_dir = os.path.join(
-                os.path.dirname(__file__),
-                f'../../uploads/simulations/{simulation_id}'
-            )
-        
+        sim_dir = os.path.join(user_simulations_dir(uid), simulation_id)
+
         db_path = os.path.join(sim_dir, "reddit_simulation.db")
         
         if not os.path.exists(db_path):
