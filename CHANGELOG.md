@@ -2,6 +2,17 @@
 
 All notable changes to MiroFish will be documented in this file.
 
+## [0.2.1.1] - 2026-03-28
+
+### Fixed
+- Closed 10 IDOR gaps across entity, profile, task polling, graph, and report endpoints
+- Entity list/detail and generate_profiles endpoints now verify project ownership
+- Task polling user_id parameter validated against authenticated user
+- Graph search, delete, and data endpoints enforce user-scoped project lookup
+- Report tool endpoints (chat, interview) verify report ownership before access
+- Report list returns empty array instead of 500 when user reports directory missing
+- Empty SECRET_KEY no longer crashes OAuth login with session initialization error
+
 ## [0.2.1.0] - 2026-03-28
 
 ### Added
