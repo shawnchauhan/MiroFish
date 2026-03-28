@@ -3,7 +3,11 @@ MiroFish Backend - Flask应用工厂
 """
 
 import os
+import time
+import tomllib
 import warnings
+from datetime import datetime, timezone
+from pathlib import Path
 
 # 抑制 multiprocessing resource_tracker 的警告（来自第三方库如 transformers）
 # 需要在所有其他导入之前设置
@@ -119,13 +123,57 @@ def create_app(config_class=Config):
     app.register_blueprint(simulation_bp, url_prefix='/api/simulation')
     app.register_blueprint(report_bp, url_prefix='/api/report')
     
+    # Startup bookkeeping for /health
+    app.config['_START_TIME'] = time.monotonic()
+    pyproject_path = Path(__file__).parent.parent / 'pyproject.toml'
+    try:
+        with open(pyproject_path, 'rb') as f:
+            app.config['_APP_VERSION'] = tomllib.load(f)['project']['version']
+    except Exception:
+        app.config['_APP_VERSION'] = 'unknown'
+
     # 健康检查
     @app.route('/health')
     def health():
-        return {'status': 'ok', 'service': 'MiroFish Backend'}
-    
+        elapsed = time.monotonic() - app.config['_START_TIME']
+        hours, remainder = divmod(int(elapsed), 3600)
+        minutes, seconds = divmod(remainder, 60)
+
+        zep_status = _check_zep()
+        overall = 'ok' if zep_status.get('status') == 'ok' else 'degraded'
+
+        return {
+            'status': overall,
+            'service': 'MiroFish Backend',
+            'uptime': {
+                'seconds': round(elapsed),
+                'human': f'{hours}h {minutes}m {seconds}s',
+            },
+            'version': app.config['_APP_VERSION'],
+            'timestamp': datetime.now(timezone.utc).isoformat(),
+            'dependencies': {
+                'zep_cloud': zep_status,
+            },
+        }
+
     if should_log_startup:
         logger.info("MiroFish Backend 启动完成")
-    
+
     return app
+
+
+def _check_zep():
+    """Lightweight Zep Cloud connectivity check with 2s timeout."""
+    api_key = Config.ZEP_API_KEY
+    if not api_key:
+        return {'status': 'not_configured'}
+    try:
+        from zep_cloud.client import Zep
+        start = time.monotonic()
+        client = Zep(api_key=api_key, timeout=2.0)
+        client.graph.list_all(page_size=1)
+        latency = round((time.monotonic() - start) * 1000)
+        return {'status': 'ok', 'latency_ms': latency}
+    except Exception as e:
+        return {'status': 'error', 'message': str(e)[:200]}
 
