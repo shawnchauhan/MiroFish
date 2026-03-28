@@ -258,16 +258,18 @@ class SimulationRunner:
         """Return True if *user_id* is the registered owner of *simulation_id*.
 
         Loads state from disk if necessary so the registry is populated.
-        Returns True when auth is disabled (user_id is None/empty).
+        Fail-closed: returns False when user_id is empty or owner is unknown.
+        When auth is disabled, ``get_current_user_id()`` returns the stable
+        dev-user ID (never None), so the empty-user guard does not trigger.
         """
         if not user_id:
-            return True  # auth disabled -- no ownership to check
+            return False  # no identity -- deny
         # Ensure registry is populated from disk
         cls.get_run_state(simulation_id)
         with cls._user_registry_lock:
             owner = cls._user_registry.get(simulation_id)
         if not owner:
-            return True  # legacy data with no owner recorded -- allow
+            return False  # unknown owner -- deny
         return owner == user_id
 
     @classmethod

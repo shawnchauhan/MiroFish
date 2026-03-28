@@ -204,6 +204,22 @@ class ProjectManager:
         return projects[:limit]
 
     @classmethod
+    def find_project_by_graph_id(cls, user_id: str, graph_id: str) -> Optional[Project]:
+        """Find a project owned by *user_id* that has the given *graph_id*.
+
+        Returns the project if found, otherwise None.  Used to verify that
+        the caller actually owns the graph before operating on it.
+        """
+        projects_dir = cls._projects_dir(user_id)
+        if not os.path.isdir(projects_dir):
+            return None
+        for project_id in os.listdir(projects_dir):
+            project = cls.get_project(user_id, project_id)
+            if project and project.graph_id == graph_id:
+                return project
+        return None
+
+    @classmethod
     def delete_project(cls, user_id: str, project_id: str) -> bool:
         """删除项目及其所有文件"""
         project_dir = cls._get_project_dir(user_id, project_id)

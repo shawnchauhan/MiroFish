@@ -370,7 +370,7 @@ def build_graph():
         
         # 创建异步任务
         task_manager = TaskManager()
-        task_id = task_manager.create_task(f"构建图谱: {graph_name}")
+        task_id = task_manager.create_task(f"构建图谱: {graph_name}", user_id=uid)
         logger.info(f"创建图谱构建任务: task_id={task_id}, project_id={project_id}")
         
         # 更新项目状态
@@ -539,14 +539,15 @@ def get_task(task_id: str):
     """
     查询任务状态
     """
-    task = TaskManager().get_task(task_id)
-    
+    uid = get_current_user_id()
+    task = TaskManager().get_task(task_id, user_id=uid)
+
     if not task:
         return jsonify({
             "success": False,
             "error": f"任务不存在: {task_id}"
         }), 404
-    
+
     return jsonify({
         "success": True,
         "data": task.to_dict()
@@ -556,13 +557,14 @@ def get_task(task_id: str):
 @graph_bp.route('/tasks', methods=['GET'])
 def list_tasks():
     """
-    列出所有任务
+    列出当前用户的任务
     """
-    tasks = TaskManager().list_tasks()
-    
+    uid = get_current_user_id()
+    tasks = TaskManager().list_tasks(user_id=uid)
+
     return jsonify({
         "success": True,
-        "data": [t.to_dict() for t in tasks],
+        "data": tasks,
         "count": len(tasks)
     })
 
@@ -572,23 +574,30 @@ def list_tasks():
 @graph_bp.route('/data/<graph_id>', methods=['GET'])
 def get_graph_data(graph_id: str):
     """
-    获取图谱数据（节点和边）
+    获取图谱数据（节点和边）- 仅返回当前用户拥有的图谱
     """
     try:
+        uid = get_current_user_id()
+        if not ProjectManager.find_project_by_graph_id(uid, graph_id):
+            return jsonify({
+                "success": False,
+                "error": "Graph not found"
+            }), 404
+
         if not Config.ZEP_API_KEY:
             return jsonify({
                 "success": False,
                 "error": "ZEP_API_KEY未配置"
             }), 500
-        
+
         builder = GraphBuilderService(api_key=Config.ZEP_API_KEY)
         graph_data = builder.get_graph_data(graph_id)
-        
+
         return jsonify({
             "success": True,
             "data": graph_data
         })
-        
+
     except Exception as e:
         logger.error(f"Internal error: {e}", exc_info=True)
         return jsonify({
@@ -600,23 +609,30 @@ def get_graph_data(graph_id: str):
 @graph_bp.route('/delete/<graph_id>', methods=['DELETE'])
 def delete_graph(graph_id: str):
     """
-    删除Zep图谱
+    删除Zep图谱 - 仅允许图谱所有者删除
     """
     try:
+        uid = get_current_user_id()
+        if not ProjectManager.find_project_by_graph_id(uid, graph_id):
+            return jsonify({
+                "success": False,
+                "error": "Graph not found"
+            }), 404
+
         if not Config.ZEP_API_KEY:
             return jsonify({
                 "success": False,
                 "error": "ZEP_API_KEY未配置"
             }), 500
-        
+
         builder = GraphBuilderService(api_key=Config.ZEP_API_KEY)
         builder.delete_graph(graph_id)
-        
+
         return jsonify({
             "success": True,
             "message": f"图谱已删除: {graph_id}"
         })
-        
+
     except Exception as e:
         logger.error(f"Internal error: {e}", exc_info=True)
         return jsonify({

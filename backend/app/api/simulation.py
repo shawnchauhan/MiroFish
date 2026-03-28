@@ -511,7 +511,8 @@ def prepare_simulation():
             metadata={
                 "simulation_id": simulation_id,
                 "project_id": state.project_id
-            }
+            },
+            user_id=get_current_user_id(),
         )
         
         # 更新模拟状态（包含预先获取的实体数量）

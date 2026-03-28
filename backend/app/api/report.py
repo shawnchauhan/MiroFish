@@ -136,7 +136,8 @@ def generate_report():
                 "simulation_id": simulation_id,
                 "graph_id": graph_id,
                 "report_id": report_id
-            }
+            },
+            user_id=get_current_user_id(),
         )
         
         # 定义后台任务
@@ -974,42 +975,42 @@ def stream_console_log(report_id: str):
 @report_bp.route('/tools/search', methods=['POST'])
 def search_graph_tool():
     """
-    图谱搜索工具接口（供调试使用）
-    
-    请求（JSON）：
-        {
-            "graph_id": "mirofish_xxxx",
-            "query": "搜索查询",
-            "limit": 10
-        }
+    图谱搜索工具接口 - 验证图谱所有权
     """
     try:
         data = request.get_json() or {}
-        
+
         graph_id = data.get('graph_id')
         query = data.get('query')
         limit = data.get('limit', 10)
-        
+
         if not graph_id or not query:
             return jsonify({
                 "success": False,
                 "error": "请提供 graph_id 和 query"
             }), 400
-        
+
+        uid = get_current_user_id()
+        if not ProjectManager.find_project_by_graph_id(uid, graph_id):
+            return jsonify({
+                "success": False,
+                "error": "Graph not found"
+            }), 404
+
         from ..services.zep_tools import ZepToolsService
-        
+
         tools = ZepToolsService()
         result = tools.search_graph(
             graph_id=graph_id,
             query=query,
             limit=limit
         )
-        
+
         return jsonify({
             "success": True,
             "data": result.to_dict()
         })
-        
+
     except Exception as e:
         logger.error(f"Internal error: {e}", exc_info=True)
         return jsonify({
@@ -1021,34 +1022,36 @@ def search_graph_tool():
 @report_bp.route('/tools/statistics', methods=['POST'])
 def get_graph_statistics_tool():
     """
-    图谱统计工具接口（供调试使用）
-    
-    请求（JSON）：
-        {
-            "graph_id": "mirofish_xxxx"
-        }
+    图谱统计工具接口 - 验证图谱所有权
     """
     try:
         data = request.get_json() or {}
-        
+
         graph_id = data.get('graph_id')
-        
+
         if not graph_id:
             return jsonify({
                 "success": False,
                 "error": "请提供 graph_id"
             }), 400
-        
+
+        uid = get_current_user_id()
+        if not ProjectManager.find_project_by_graph_id(uid, graph_id):
+            return jsonify({
+                "success": False,
+                "error": "Graph not found"
+            }), 404
+
         from ..services.zep_tools import ZepToolsService
-        
+
         tools = ZepToolsService()
         result = tools.get_graph_statistics(graph_id)
-        
+
         return jsonify({
             "success": True,
             "data": result
         })
-        
+
     except Exception as e:
         logger.error(f"Internal error: {e}", exc_info=True)
         return jsonify({

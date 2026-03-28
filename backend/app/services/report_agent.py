@@ -1927,16 +1927,16 @@ class ReportManager:
         """Return True if *user_id* is the registered owner of *report_id*.
 
         Loads from disk if needed so the registry is populated.
-        Returns True when auth is disabled (user_id is None/empty).
+        Fail-closed: returns False when user_id is empty or owner is unknown.
         """
         if not user_id:
-            return True  # auth disabled
+            return False  # no identity -- deny
         # Ensure registry is populated from disk
         cls.get_report(report_id)
         with cls._user_registry_lock:
             owner = cls._user_registry.get(report_id)
         if not owner:
-            return True  # legacy data with no owner
+            return False  # unknown owner -- deny
         return owner == user_id
 
     @classmethod
