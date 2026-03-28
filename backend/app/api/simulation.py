@@ -934,7 +934,7 @@ def get_simulation_history():
                 recommended_rounds = 0
             
             # 获取运行状态（从 run_state.json 读取用户设置的实际轮数）
-            _register_sim_user(simulation_id)
+            _register_sim_user(sim.simulation_id)
             run_state = SimulationRunner.get_run_state(sim.simulation_id)
             if run_state:
                 sim_dict["current_round"] = run_state.current_round
