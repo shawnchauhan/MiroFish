@@ -8,6 +8,7 @@ import traceback
 from flask import request, jsonify, send_file
 
 from . import simulation_bp
+from ..auth.helpers import get_current_user_id
 from ..config import Config
 from ..services.zep_entity_reader import ZepEntityReader
 from ..services.oasis_profile_generator import OasisProfileGenerator
@@ -17,6 +18,21 @@ from ..utils.logger import get_logger
 from ..models.project import ProjectManager
 
 logger = get_logger('mirofish.api.simulation')
+
+
+def _register_sim_user(simulation_id: str):
+    """Register current user as owner of this simulation for path resolution."""
+    SimulationRunner.register_user(simulation_id, get_current_user_id())
+
+
+def _require_sim_owner(simulation_id: str):
+    """Register + verify ownership.  Returns a 404 response if the current
+    user does not own *simulation_id*, otherwise None."""
+    uid = get_current_user_id()
+    SimulationRunner.register_user(simulation_id, uid)
+    if not SimulationRunner.verify_owner(simulation_id, uid):
+        return jsonify({"success": False, "error": "Simulation not found"}), 404
+    return None
 
 
 # Interview prompt 优化前缀
@@ -61,13 +77,20 @@ def get_graph_entities(graph_id: str):
                 "success": False,
                 "error": "ZEP_API_KEY未配置"
             }), 500
-        
+
+        uid = get_current_user_id()
+        if not ProjectManager.find_project_by_graph_id(uid, graph_id):
+            return jsonify({
+                "success": False,
+                "error": "Graph not found"
+            }), 404
+
         entity_types_str = request.args.get('entity_types', '')
         entity_types = [t.strip() for t in entity_types_str.split(',') if t.strip()] if entity_types_str else None
         enrich = request.args.get('enrich', 'true').lower() == 'true'
-        
+
         logger.info(f"获取图谱实体: graph_id={graph_id}, entity_types={entity_types}, enrich={enrich}")
-        
+
         reader = ZepEntityReader()
         result = reader.filter_defined_entities(
             graph_id=graph_id,
@@ -81,11 +104,10 @@ def get_graph_entities(graph_id: str):
         })
         
     except Exception as e:
-        logger.error(f"获取图谱实体失败: {str(e)}")
+        logger.error(f"Internal error: {e}", exc_info=True)
         return jsonify({
             "success": False,
-            "error": str(e),
-            "traceback": traceback.format_exc()
+            "error": "Internal server error"
         }), 500
 
 
@@ -98,7 +120,14 @@ def get_entity_detail(graph_id: str, entity_uuid: str):
                 "success": False,
                 "error": "ZEP_API_KEY未配置"
             }), 500
-        
+
+        uid = get_current_user_id()
+        if not ProjectManager.find_project_by_graph_id(uid, graph_id):
+            return jsonify({
+                "success": False,
+                "error": "Graph not found"
+            }), 404
+
         reader = ZepEntityReader()
         entity = reader.get_entity_with_context(graph_id, entity_uuid)
         
@@ -114,11 +143,10 @@ def get_entity_detail(graph_id: str, entity_uuid: str):
         })
         
     except Exception as e:
-        logger.error(f"获取实体详情失败: {str(e)}")
+        logger.error(f"Internal error: {e}", exc_info=True)
         return jsonify({
             "success": False,
-            "error": str(e),
-            "traceback": traceback.format_exc()
+            "error": "Internal server error"
         }), 500
 
 
@@ -131,9 +159,16 @@ def get_entities_by_type(graph_id: str, entity_type: str):
                 "success": False,
                 "error": "ZEP_API_KEY未配置"
             }), 500
-        
+
+        uid = get_current_user_id()
+        if not ProjectManager.find_project_by_graph_id(uid, graph_id):
+            return jsonify({
+                "success": False,
+                "error": "Graph not found"
+            }), 404
+
         enrich = request.args.get('enrich', 'true').lower() == 'true'
-        
+
         reader = ZepEntityReader()
         entities = reader.get_entities_by_type(
             graph_id=graph_id,
@@ -151,11 +186,10 @@ def get_entities_by_type(graph_id: str, entity_type: str):
         })
         
     except Exception as e:
-        logger.error(f"获取实体失败: {str(e)}")
+        logger.error(f"Internal error: {e}", exc_info=True)
         return jsonify({
             "success": False,
-            "error": str(e),
-            "traceback": traceback.format_exc()
+            "error": "Internal server error"
         }), 500
 
 
@@ -200,7 +234,7 @@ def create_simulation():
                 "error": "请提供 project_id"
             }), 400
         
-        project = ProjectManager.get_project(project_id)
+        project = ProjectManager.get_project(get_current_user_id(),project_id)
         if not project:
             return jsonify({
                 "success": False,
@@ -214,7 +248,7 @@ def create_simulation():
                 "error": "项目尚未构建图谱，请先调用 /api/graph/build"
             }), 400
         
-        manager = SimulationManager()
+        manager = SimulationManager(get_current_user_id())
         state = manager.create_simulation(
             project_id=project_id,
             graph_id=graph_id,
@@ -228,34 +262,35 @@ def create_simulation():
         })
         
     except Exception as e:
-        logger.error(f"创建模拟失败: {str(e)}")
+        logger.error(f"Internal error: {e}", exc_info=True)
         return jsonify({
             "success": False,
-            "error": str(e),
-            "traceback": traceback.format_exc()
+            "error": "Internal server error"
         }), 500
 
 
-def _check_simulation_prepared(simulation_id: str) -> tuple:
+def _check_simulation_prepared(simulation_id: str, user_id: str = None) -> tuple:
     """
     检查模拟是否已经准备完成
-    
+
     检查条件：
     1. state.json 存在且 status 为 "ready"
     2. 必要文件存在：reddit_profiles.json, twitter_profiles.csv, simulation_config.json
-    
+
     注意：运行脚本(run_*.py)保留在 backend/scripts/ 目录，不再复制到模拟目录
-    
+
     Args:
         simulation_id: 模拟ID
-        
+        user_id: 用户ID (defaults to current user)
+
     Returns:
         (is_prepared: bool, info: dict)
     """
     import os
-    from ..config import Config
-    
-    simulation_dir = os.path.join(Config.OASIS_SIMULATION_DATA_DIR, simulation_id)
+    from ..utils.paths import user_simulations_dir
+
+    uid = user_id or get_current_user_id()
+    simulation_dir = os.path.join(user_simulations_dir(uid), simulation_id)
     
     # 检查目录是否存在
     if not os.path.exists(simulation_dir):
@@ -411,15 +446,19 @@ def prepare_simulation():
                 "error": "请提供 simulation_id"
             }), 400
         
-        manager = SimulationManager()
+        manager = SimulationManager(get_current_user_id())
         state = manager.get_simulation(simulation_id)
-        
+
         if not state:
             return jsonify({
                 "success": False,
                 "error": f"模拟不存在: {simulation_id}"
             }), 404
-        
+
+        deny = _require_sim_owner(simulation_id)
+        if deny:
+            return deny
+
         # 检查是否强制重新生成
         force_regenerate = data.get('force_regenerate', False)
         logger.info(f"开始处理 /prepare 请求: simulation_id={simulation_id}, force_regenerate={force_regenerate}")
@@ -445,7 +484,7 @@ def prepare_simulation():
                 logger.info(f"模拟 {simulation_id} 未准备完成，将启动准备任务")
         
         # 从项目获取必要信息
-        project = ProjectManager.get_project(state.project_id)
+        project = ProjectManager.get_project(get_current_user_id(),state.project_id)
         if not project:
             return jsonify({
                 "success": False,
@@ -461,7 +500,7 @@ def prepare_simulation():
             }), 400
         
         # 获取文档文本
-        document_text = ProjectManager.get_extracted_text(state.project_id) or ""
+        document_text = ProjectManager.get_extracted_text(get_current_user_id(),state.project_id) or ""
         
         entity_types_list = data.get('entity_types')
         use_llm_for_profiles = data.get('use_llm_for_profiles', True)
@@ -493,7 +532,8 @@ def prepare_simulation():
             metadata={
                 "simulation_id": simulation_id,
                 "project_id": state.project_id
-            }
+            },
+            user_id=get_current_user_id(),
         )
         
         # 更新模拟状态（包含预先获取的实体数量）
@@ -626,11 +666,10 @@ def prepare_simulation():
         }), 404
         
     except Exception as e:
-        logger.error(f"启动准备任务失败: {str(e)}")
+        logger.error(f"Internal error: {e}", exc_info=True)
         return jsonify({
             "success": False,
-            "error": str(e),
-            "traceback": traceback.format_exc()
+            "error": "Internal server error"
         }), 500
 
 
@@ -706,8 +745,9 @@ def get_prepare_status():
             }), 400
         
         task_manager = TaskManager()
-        task = task_manager.get_task(task_id)
-        
+        uid = get_current_user_id()
+        task = task_manager.get_task(task_id, user_id=uid)
+
         if not task:
             # 任务不存在，但如果有simulation_id，检查是否已准备完成
             if simulation_id:
@@ -751,7 +791,7 @@ def get_prepare_status():
 def get_simulation(simulation_id: str):
     """获取模拟状态"""
     try:
-        manager = SimulationManager()
+        manager = SimulationManager(get_current_user_id())
         state = manager.get_simulation(simulation_id)
         
         if not state:
@@ -772,11 +812,10 @@ def get_simulation(simulation_id: str):
         })
         
     except Exception as e:
-        logger.error(f"获取模拟状态失败: {str(e)}")
+        logger.error(f"Internal error: {e}", exc_info=True)
         return jsonify({
             "success": False,
-            "error": str(e),
-            "traceback": traceback.format_exc()
+            "error": "Internal server error"
         }), 500
 
 
@@ -791,7 +830,7 @@ def list_simulations():
     try:
         project_id = request.args.get('project_id')
         
-        manager = SimulationManager()
+        manager = SimulationManager(get_current_user_id())
         simulations = manager.list_simulations(project_id=project_id)
         
         return jsonify({
@@ -801,33 +840,32 @@ def list_simulations():
         })
         
     except Exception as e:
-        logger.error(f"列出模拟失败: {str(e)}")
+        logger.error(f"Internal error: {e}", exc_info=True)
         return jsonify({
             "success": False,
-            "error": str(e),
-            "traceback": traceback.format_exc()
+            "error": "Internal server error"
         }), 500
 
 
 def _get_report_id_for_simulation(simulation_id: str) -> str:
     """
-    获取 simulation 对应的最新 report_id
-    
-    遍历 reports 目录，找出 simulation_id 匹配的 report，
+    获取 simulation 对应的最新 report_id (user-scoped)
+
+    遍历当前用户的 reports 目录，找出 simulation_id 匹配的 report，
     如果有多个则返回最新的（按 created_at 排序）
-    
+
     Args:
         simulation_id: 模拟ID
-        
+
     Returns:
         report_id 或 None
     """
     import json
     from datetime import datetime
-    
-    # reports 目录路径：backend/uploads/reports
-    # __file__ 是 app/api/simulation.py，需要向上两级到 backend/
-    reports_dir = os.path.join(os.path.dirname(__file__), '../../uploads/reports')
+    from ..utils.paths import user_reports_dir
+
+    uid = get_current_user_id()
+    reports_dir = user_reports_dir(uid)
     if not os.path.exists(reports_dir):
         return None
     
@@ -906,7 +944,7 @@ def get_simulation_history():
     try:
         limit = request.args.get('limit', 20, type=int)
         
-        manager = SimulationManager()
+        manager = SimulationManager(get_current_user_id())
         simulations = manager.list_simulations()[:limit]
         
         # 增强模拟数据，只从 Simulation 文件读取
@@ -931,6 +969,8 @@ def get_simulation_history():
                 recommended_rounds = 0
             
             # 获取运行状态（从 run_state.json 读取用户设置的实际轮数）
+            # Registration only -- this list is already user-scoped
+            SimulationRunner.register_user(sim.simulation_id, get_current_user_id())
             run_state = SimulationRunner.get_run_state(sim.simulation_id)
             if run_state:
                 sim_dict["current_round"] = run_state.current_round
@@ -943,7 +983,7 @@ def get_simulation_history():
                 sim_dict["total_rounds"] = recommended_rounds
             
             # 获取关联项目的文件列表（最多3个）
-            project = ProjectManager.get_project(sim.project_id)
+            project = ProjectManager.get_project(get_current_user_id(),sim.project_id)
             if project and hasattr(project, 'files') and project.files:
                 sim_dict["files"] = [
                     {"filename": f.get("filename", "未知文件")} 
@@ -956,13 +996,14 @@ def get_simulation_history():
             sim_dict["report_id"] = _get_report_id_for_simulation(sim.simulation_id)
             
             # 添加版本号
-            sim_dict["version"] = "v1.0.2"
+            from flask import current_app
+            sim_dict["version"] = f"v{current_app.config.get('_APP_VERSION', 'unknown')}"
             
             # 格式化日期
             try:
                 created_date = sim_dict.get("created_at", "")[:10]
                 sim_dict["created_date"] = created_date
-            except:
+            except Exception:
                 sim_dict["created_date"] = ""
             
             enriched_simulations.append(sim_dict)
@@ -974,11 +1015,10 @@ def get_simulation_history():
         })
         
     except Exception as e:
-        logger.error(f"获取历史模拟失败: {str(e)}")
+        logger.error(f"Internal error: {e}", exc_info=True)
         return jsonify({
             "success": False,
-            "error": str(e),
-            "traceback": traceback.format_exc()
+            "error": "Internal server error"
         }), 500
 
 
@@ -993,7 +1033,7 @@ def get_simulation_profiles(simulation_id: str):
     try:
         platform = request.args.get('platform', 'reddit')
         
-        manager = SimulationManager()
+        manager = SimulationManager(get_current_user_id())
         profiles = manager.get_profiles(simulation_id, platform=platform)
         
         return jsonify({
@@ -1012,11 +1052,10 @@ def get_simulation_profiles(simulation_id: str):
         }), 404
         
     except Exception as e:
-        logger.error(f"获取Profile失败: {str(e)}")
+        logger.error(f"Internal error: {e}", exc_info=True)
         return jsonify({
             "success": False,
-            "error": str(e),
-            "traceback": traceback.format_exc()
+            "error": "Internal server error"
         }), 500
 
 
@@ -1054,16 +1093,21 @@ def get_simulation_profiles_realtime(simulation_id: str):
     
     try:
         platform = request.args.get('platform', 'reddit')
-        
-        # 获取模拟目录
-        sim_dir = os.path.join(Config.OASIS_SIMULATION_DATA_DIR, simulation_id)
-        
+
+        deny = _require_sim_owner(simulation_id)
+        if deny:
+            return deny
+
+        # 获取模拟目录 (user-scoped)
+        from ..utils.paths import user_simulations_dir
+        sim_dir = os.path.join(user_simulations_dir(get_current_user_id()), simulation_id)
+
         if not os.path.exists(sim_dir):
             return jsonify({
                 "success": False,
                 "error": f"模拟不存在: {simulation_id}"
             }), 404
-        
+
         # 确定文件路径
         if platform == "reddit":
             profiles_file = os.path.join(sim_dir, "reddit_profiles.json")
@@ -1122,11 +1166,10 @@ def get_simulation_profiles_realtime(simulation_id: str):
         })
         
     except Exception as e:
-        logger.error(f"实时获取Profile失败: {str(e)}")
+        logger.error(f"Internal error: {e}", exc_info=True)
         return jsonify({
             "success": False,
-            "error": str(e),
-            "traceback": traceback.format_exc()
+            "error": "Internal server error"
         }), 500
 
 
@@ -1158,15 +1201,20 @@ def get_simulation_config_realtime(simulation_id: str):
     from datetime import datetime
     
     try:
-        # 获取模拟目录
-        sim_dir = os.path.join(Config.OASIS_SIMULATION_DATA_DIR, simulation_id)
-        
+        deny = _require_sim_owner(simulation_id)
+        if deny:
+            return deny
+
+        # 获取模拟目录 (user-scoped)
+        from ..utils.paths import user_simulations_dir
+        sim_dir = os.path.join(user_simulations_dir(get_current_user_id()), simulation_id)
+
         if not os.path.exists(sim_dir):
             return jsonify({
                 "success": False,
                 "error": f"模拟不存在: {simulation_id}"
             }), 404
-        
+
         # 配置文件路径
         config_file = os.path.join(sim_dir, "simulation_config.json")
         
@@ -1242,11 +1290,10 @@ def get_simulation_config_realtime(simulation_id: str):
         })
         
     except Exception as e:
-        logger.error(f"实时获取Config失败: {str(e)}")
+        logger.error(f"Internal error: {e}", exc_info=True)
         return jsonify({
             "success": False,
-            "error": str(e),
-            "traceback": traceback.format_exc()
+            "error": "Internal server error"
         }), 500
 
 
@@ -1263,7 +1310,7 @@ def get_simulation_config(simulation_id: str):
         - generation_reasoning: LLM的配置推理说明
     """
     try:
-        manager = SimulationManager()
+        manager = SimulationManager(get_current_user_id())
         config = manager.get_simulation_config(simulation_id)
         
         if not config:
@@ -1278,11 +1325,10 @@ def get_simulation_config(simulation_id: str):
         })
         
     except Exception as e:
-        logger.error(f"获取配置失败: {str(e)}")
+        logger.error(f"Internal error: {e}", exc_info=True)
         return jsonify({
             "success": False,
-            "error": str(e),
-            "traceback": traceback.format_exc()
+            "error": "Internal server error"
         }), 500
 
 
@@ -1290,7 +1336,7 @@ def get_simulation_config(simulation_id: str):
 def download_simulation_config(simulation_id: str):
     """下载模拟配置文件"""
     try:
-        manager = SimulationManager()
+        manager = SimulationManager(get_current_user_id())
         sim_dir = manager._get_simulation_dir(simulation_id)
         config_path = os.path.join(sim_dir, "simulation_config.json")
         
@@ -1307,11 +1353,10 @@ def download_simulation_config(simulation_id: str):
         )
         
     except Exception as e:
-        logger.error(f"下载配置失败: {str(e)}")
+        logger.error(f"Internal error: {e}", exc_info=True)
         return jsonify({
             "success": False,
-            "error": str(e),
-            "traceback": traceback.format_exc()
+            "error": "Internal server error"
         }), 500
 
 
@@ -1359,11 +1404,10 @@ def download_simulation_script(script_name: str):
         )
         
     except Exception as e:
-        logger.error(f"下载脚本失败: {str(e)}")
+        logger.error(f"Internal error: {e}", exc_info=True)
         return jsonify({
             "success": False,
-            "error": str(e),
-            "traceback": traceback.format_exc()
+            "error": "Internal server error"
         }), 500
 
 
@@ -1391,7 +1435,14 @@ def generate_profiles():
                 "success": False,
                 "error": "请提供 graph_id"
             }), 400
-        
+
+        uid = get_current_user_id()
+        if not ProjectManager.find_project_by_graph_id(uid, graph_id):
+            return jsonify({
+                "success": False,
+                "error": "Graph not found"
+            }), 404
+
         entity_types = data.get('entity_types')
         use_llm = data.get('use_llm', True)
         platform = data.get('platform', 'reddit')
@@ -1433,11 +1484,10 @@ def generate_profiles():
         })
         
     except Exception as e:
-        logger.error(f"生成Profile失败: {str(e)}")
+        logger.error(f"Internal error: {e}", exc_info=True)
         return jsonify({
             "success": False,
-            "error": str(e),
-            "traceback": traceback.format_exc()
+            "error": "Internal server error"
         }), 500
 
 
@@ -1521,7 +1571,7 @@ def start_simulation():
             }), 400
 
         # 检查模拟是否已准备好
-        manager = SimulationManager()
+        manager = SimulationManager(get_current_user_id())
         state = manager.get_simulation(simulation_id)
 
         if not state:
@@ -1529,6 +1579,10 @@ def start_simulation():
                 "success": False,
                 "error": f"模拟不存在: {simulation_id}"
             }), 404
+
+        deny = _require_sim_owner(simulation_id)
+        if deny:
+            return deny
 
         force_restarted = False
         
@@ -1583,7 +1637,7 @@ def start_simulation():
             graph_id = state.graph_id
             if not graph_id:
                 # 尝试从项目中获取
-                project = ProjectManager.get_project(state.project_id)
+                project = ProjectManager.get_project(get_current_user_id(),state.project_id)
                 if project:
                     graph_id = project.graph_id
             
@@ -1628,11 +1682,10 @@ def start_simulation():
         }), 400
         
     except Exception as e:
-        logger.error(f"启动模拟失败: {str(e)}")
+        logger.error(f"Internal error: {e}", exc_info=True)
         return jsonify({
             "success": False,
-            "error": str(e),
-            "traceback": traceback.format_exc()
+            "error": "Internal server error"
         }), 500
 
 
@@ -1666,10 +1719,13 @@ def stop_simulation():
                 "error": "请提供 simulation_id"
             }), 400
         
+        deny = _require_sim_owner(simulation_id)
+        if deny:
+            return deny
         run_state = SimulationRunner.stop_simulation(simulation_id)
         
         # 更新模拟状态
-        manager = SimulationManager()
+        manager = SimulationManager(get_current_user_id())
         state = manager.get_simulation(simulation_id)
         if state:
             state.status = SimulationStatus.PAUSED
@@ -1687,11 +1743,10 @@ def stop_simulation():
         }), 400
         
     except Exception as e:
-        logger.error(f"停止模拟失败: {str(e)}")
+        logger.error(f"Internal error: {e}", exc_info=True)
         return jsonify({
             "success": False,
-            "error": str(e),
-            "traceback": traceback.format_exc()
+            "error": "Internal server error"
         }), 500
 
 
@@ -1724,6 +1779,9 @@ def get_run_status(simulation_id: str):
         }
     """
     try:
+        deny = _require_sim_owner(simulation_id)
+        if deny:
+            return deny
         run_state = SimulationRunner.get_run_state(simulation_id)
         
         if not run_state:
@@ -1747,11 +1805,10 @@ def get_run_status(simulation_id: str):
         })
         
     except Exception as e:
-        logger.error(f"获取运行状态失败: {str(e)}")
+        logger.error(f"Internal error: {e}", exc_info=True)
         return jsonify({
             "success": False,
-            "error": str(e),
-            "traceback": traceback.format_exc()
+            "error": "Internal server error"
         }), 500
 
 
@@ -1793,6 +1850,9 @@ def get_run_status_detail(simulation_id: str):
         }
     """
     try:
+        deny = _require_sim_owner(simulation_id)
+        if deny:
+            return deny
         run_state = SimulationRunner.get_run_state(simulation_id)
         platform_filter = request.args.get('platform')
         
@@ -1848,11 +1908,10 @@ def get_run_status_detail(simulation_id: str):
         })
         
     except Exception as e:
-        logger.error(f"获取详细状态失败: {str(e)}")
+        logger.error(f"Internal error: {e}", exc_info=True)
         return jsonify({
             "success": False,
-            "error": str(e),
-            "traceback": traceback.format_exc()
+            "error": "Internal server error"
         }), 500
 
 
@@ -1884,6 +1943,9 @@ def get_simulation_actions(simulation_id: str):
         agent_id = request.args.get('agent_id', type=int)
         round_num = request.args.get('round_num', type=int)
         
+        deny = _require_sim_owner(simulation_id)
+        if deny:
+            return deny
         actions = SimulationRunner.get_actions(
             simulation_id=simulation_id,
             limit=limit,
@@ -1902,11 +1964,10 @@ def get_simulation_actions(simulation_id: str):
         })
         
     except Exception as e:
-        logger.error(f"获取动作历史失败: {str(e)}")
+        logger.error(f"Internal error: {e}", exc_info=True)
         return jsonify({
             "success": False,
-            "error": str(e),
-            "traceback": traceback.format_exc()
+            "error": "Internal server error"
         }), 500
 
 
@@ -1927,6 +1988,9 @@ def get_simulation_timeline(simulation_id: str):
         start_round = request.args.get('start_round', 0, type=int)
         end_round = request.args.get('end_round', type=int)
         
+        deny = _require_sim_owner(simulation_id)
+        if deny:
+            return deny
         timeline = SimulationRunner.get_timeline(
             simulation_id=simulation_id,
             start_round=start_round,
@@ -1942,11 +2006,10 @@ def get_simulation_timeline(simulation_id: str):
         })
         
     except Exception as e:
-        logger.error(f"获取时间线失败: {str(e)}")
+        logger.error(f"Internal error: {e}", exc_info=True)
         return jsonify({
             "success": False,
-            "error": str(e),
-            "traceback": traceback.format_exc()
+            "error": "Internal server error"
         }), 500
 
 
@@ -1958,6 +2021,9 @@ def get_agent_stats(simulation_id: str):
     用于前端展示Agent活跃度排行、动作分布等
     """
     try:
+        deny = _require_sim_owner(simulation_id)
+        if deny:
+            return deny
         stats = SimulationRunner.get_agent_stats(simulation_id)
         
         return jsonify({
@@ -1969,11 +2035,10 @@ def get_agent_stats(simulation_id: str):
         })
         
     except Exception as e:
-        logger.error(f"获取Agent统计失败: {str(e)}")
+        logger.error(f"Internal error: {e}", exc_info=True)
         return jsonify({
             "success": False,
-            "error": str(e),
-            "traceback": traceback.format_exc()
+            "error": "Internal server error"
         }), 500
 
 
@@ -1992,18 +2057,21 @@ def get_simulation_posts(simulation_id: str):
     返回帖子列表（从SQLite数据库读取）
     """
     try:
+        deny = _require_sim_owner(simulation_id)
+        if deny:
+            return deny
+
         platform = request.args.get('platform', 'reddit')
         limit = request.args.get('limit', 50, type=int)
         offset = request.args.get('offset', 0, type=int)
-        
-        sim_dir = os.path.join(
-            os.path.dirname(__file__),
-            f'../../uploads/simulations/{simulation_id}'
-        )
-        
+
+        from ..utils.paths import user_simulations_dir
+        uid = get_current_user_id()
+        sim_dir = os.path.join(user_simulations_dir(uid), simulation_id)
+
         db_file = f"{platform}_simulation.db"
         db_path = os.path.join(sim_dir, db_file)
-        
+
         if not os.path.exists(db_path):
             return jsonify({
                 "success": True,
@@ -2049,11 +2117,10 @@ def get_simulation_posts(simulation_id: str):
         })
         
     except Exception as e:
-        logger.error(f"获取帖子失败: {str(e)}")
+        logger.error(f"Internal error: {e}", exc_info=True)
         return jsonify({
             "success": False,
-            "error": str(e),
-            "traceback": traceback.format_exc()
+            "error": "Internal server error"
         }), 500
 
 
@@ -2068,15 +2135,18 @@ def get_simulation_comments(simulation_id: str):
         offset: 偏移量
     """
     try:
+        deny = _require_sim_owner(simulation_id)
+        if deny:
+            return deny
+
         post_id = request.args.get('post_id')
         limit = request.args.get('limit', 50, type=int)
         offset = request.args.get('offset', 0, type=int)
-        
-        sim_dir = os.path.join(
-            os.path.dirname(__file__),
-            f'../../uploads/simulations/{simulation_id}'
-        )
-        
+
+        from ..utils.paths import user_simulations_dir
+        uid = get_current_user_id()
+        sim_dir = os.path.join(user_simulations_dir(uid), simulation_id)
+
         db_path = os.path.join(sim_dir, "reddit_simulation.db")
         
         if not os.path.exists(db_path):
@@ -2124,11 +2194,10 @@ def get_simulation_comments(simulation_id: str):
         })
         
     except Exception as e:
-        logger.error(f"获取评论失败: {str(e)}")
+        logger.error(f"Internal error: {e}", exc_info=True)
         return jsonify({
             "success": False,
-            "error": str(e),
-            "traceback": traceback.format_exc()
+            "error": "Internal server error"
         }), 500
 
 
@@ -2220,6 +2289,9 @@ def interview_agent():
             }), 400
         
         # 检查环境状态
+        deny = _require_sim_owner(simulation_id)
+        if deny:
+            return deny
         if not SimulationRunner.check_env_alive(simulation_id):
             return jsonify({
                 "success": False,
@@ -2255,11 +2327,10 @@ def interview_agent():
         }), 504
         
     except Exception as e:
-        logger.error(f"Interview失败: {str(e)}")
+        logger.error(f"Internal error: {e}", exc_info=True)
         return jsonify({
             "success": False,
-            "error": str(e),
-            "traceback": traceback.format_exc()
+            "error": "Internal server error"
         }), 500
 
 
@@ -2355,6 +2426,9 @@ def interview_agents_batch():
                 }), 400
 
         # 检查环境状态
+        deny = _require_sim_owner(simulation_id)
+        if deny:
+            return deny
         if not SimulationRunner.check_env_alive(simulation_id):
             return jsonify({
                 "success": False,
@@ -2393,11 +2467,10 @@ def interview_agents_batch():
         }), 504
 
     except Exception as e:
-        logger.error(f"批量Interview失败: {str(e)}")
+        logger.error(f"Internal error: {e}", exc_info=True)
         return jsonify({
             "success": False,
-            "error": str(e),
-            "traceback": traceback.format_exc()
+            "error": "Internal server error"
         }), 500
 
 
@@ -2462,6 +2535,9 @@ def interview_all_agents():
             }), 400
 
         # 检查环境状态
+        deny = _require_sim_owner(simulation_id)
+        if deny:
+            return deny
         if not SimulationRunner.check_env_alive(simulation_id):
             return jsonify({
                 "success": False,
@@ -2496,11 +2572,10 @@ def interview_all_agents():
         }), 504
 
     except Exception as e:
-        logger.error(f"全局Interview失败: {str(e)}")
+        logger.error(f"Internal error: {e}", exc_info=True)
         return jsonify({
             "success": False,
-            "error": str(e),
-            "traceback": traceback.format_exc()
+            "error": "Internal server error"
         }), 500
 
 
@@ -2552,6 +2627,9 @@ def get_interview_history():
                 "error": "请提供 simulation_id"
             }), 400
 
+        deny = _require_sim_owner(simulation_id)
+        if deny:
+            return deny
         history = SimulationRunner.get_interview_history(
             simulation_id=simulation_id,
             platform=platform,
@@ -2568,11 +2646,10 @@ def get_interview_history():
         })
 
     except Exception as e:
-        logger.error(f"获取Interview历史失败: {str(e)}")
+        logger.error(f"Internal error: {e}", exc_info=True)
         return jsonify({
             "success": False,
-            "error": str(e),
-            "traceback": traceback.format_exc()
+            "error": "Internal server error"
         }), 500
 
 
@@ -2611,6 +2688,9 @@ def get_env_status():
                 "error": "请提供 simulation_id"
             }), 400
 
+        deny = _require_sim_owner(simulation_id)
+        if deny:
+            return deny
         env_alive = SimulationRunner.check_env_alive(simulation_id)
         
         # 获取更详细的状态信息
@@ -2633,11 +2713,10 @@ def get_env_status():
         })
 
     except Exception as e:
-        logger.error(f"获取环境状态失败: {str(e)}")
+        logger.error(f"Internal error: {e}", exc_info=True)
         return jsonify({
             "success": False,
-            "error": str(e),
-            "traceback": traceback.format_exc()
+            "error": "Internal server error"
         }), 500
 
 
@@ -2679,13 +2758,16 @@ def close_simulation_env():
                 "error": "请提供 simulation_id"
             }), 400
         
+        deny = _require_sim_owner(simulation_id)
+        if deny:
+            return deny
         result = SimulationRunner.close_simulation_env(
             simulation_id=simulation_id,
             timeout=timeout
         )
         
         # 更新模拟状态
-        manager = SimulationManager()
+        manager = SimulationManager(get_current_user_id())
         state = manager.get_simulation(simulation_id)
         if state:
             state.status = SimulationStatus.COMPLETED
@@ -2703,9 +2785,8 @@ def close_simulation_env():
         }), 400
         
     except Exception as e:
-        logger.error(f"关闭环境失败: {str(e)}")
+        logger.error(f"Internal error: {e}", exc_info=True)
         return jsonify({
             "success": False,
-            "error": str(e),
-            "traceback": traceback.format_exc()
+            "error": "Internal server error"
         }), 500

@@ -13,6 +13,8 @@ import os
 import json
 import time
 import re
+import threading
+from collections import OrderedDict
 from typing import Dict, Any, List, Optional, Callable
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -40,17 +42,17 @@ class ReportLogger:
     每行是一个完整的 JSON 对象，包含时间戳、动作类型、详细内容等。
     """
     
-    def __init__(self, report_id: str):
+    def __init__(self, report_id: str, user_id: str = None):
         """
         初始化日志记录器
-        
+
         Args:
             report_id: 报告ID，用于确定日志文件路径
+            user_id: 用户ID，用于确定用户目录
         """
         self.report_id = report_id
-        self.log_file_path = os.path.join(
-            Config.UPLOAD_FOLDER, 'reports', report_id, 'agent_log.jsonl'
-        )
+        base = ReportManager._reports_base(report_id, user_id=user_id)
+        self.log_file_path = os.path.join(base, report_id, 'agent_log.jsonl')
         self.start_time = datetime.now()
         self._ensure_log_file()
     
@@ -311,17 +313,17 @@ class ReportConsoleLogger:
     这些日志与 agent_log.jsonl 不同，是纯文本格式的控制台输出。
     """
     
-    def __init__(self, report_id: str):
+    def __init__(self, report_id: str, user_id: str = None):
         """
         初始化控制台日志记录器
-        
+
         Args:
             report_id: 报告ID，用于确定日志文件路径
+            user_id: 用户ID，用于确定用户目录
         """
         self.report_id = report_id
-        self.log_file_path = os.path.join(
-            Config.UPLOAD_FOLDER, 'reports', report_id, 'console_log.txt'
-        )
+        base = ReportManager._reports_base(report_id, user_id=user_id)
+        self.log_file_path = os.path.join(base, report_id, 'console_log.txt')
         self._ensure_log_file()
         self._file_handler = None
         self._setup_file_handler()
@@ -1898,18 +1900,71 @@ class ReportManager:
         full_report.md     - 完整报告
     """
     
-    # 报告存储目录
-    REPORTS_DIR = os.path.join(Config.UPLOAD_FOLDER, 'reports')
-    
+    # Legacy dir; use _reports_dir(report_id) instead
+    _LEGACY_REPORTS_DIR = os.path.join(Config.UPLOAD_FOLDER, 'reports')
+
+    # report_id -> user_id registry (bounded to prevent memory growth)
+    _user_registry: OrderedDict = OrderedDict()
+    _user_registry_lock = threading.Lock()
+    _USER_REGISTRY_MAX = 10000
+
     @classmethod
-    def _ensure_reports_dir(cls):
+    def register_user(cls, report_id: str, user_id: str):
+        """Register which user owns a report (call from API layer).
+
+        Will not overwrite an existing entry -- the persisted user_id
+        from meta.json is authoritative.  Prevents IDOR registry
+        corruption.
+        """
+        with cls._user_registry_lock:
+            if report_id not in cls._user_registry:
+                cls._user_registry[report_id] = user_id
+                if len(cls._user_registry) > cls._USER_REGISTRY_MAX:
+                    cls._user_registry.popitem(last=False)
+
+    @classmethod
+    def verify_owner(cls, report_id: str, user_id: str) -> bool:
+        """Return True if *user_id* is the registered owner of *report_id*.
+
+        Loads from disk if needed so the registry is populated.
+        Fail-closed: returns False when user_id is empty or owner is unknown.
+        """
+        if not user_id:
+            return False  # no identity -- deny
+        # Ensure registry is populated from disk
+        cls.get_report(report_id)
+        with cls._user_registry_lock:
+            owner = cls._user_registry.get(report_id)
+        if not owner:
+            return False  # unknown owner -- deny
+        return owner == user_id
+
+    @classmethod
+    def _reports_base(cls, report_id: str = None, user_id: str = None) -> str:
+        """Get reports base dir.
+
+        Prefer the explicit *user_id* when available (passed from the
+        request context).  Fall back to the in-memory registry, then to
+        the legacy flat directory.
+        """
+        uid = user_id
+        if not uid and report_id:
+            with cls._user_registry_lock:
+                uid = cls._user_registry.get(report_id)
+        if uid:
+            from ..utils.paths import user_reports_dir
+            return user_reports_dir(uid)
+        return cls._LEGACY_REPORTS_DIR
+
+    @classmethod
+    def _ensure_reports_dir(cls, report_id: str = None):
         """确保报告根目录存在"""
-        os.makedirs(cls.REPORTS_DIR, exist_ok=True)
-    
+        os.makedirs(cls._reports_base(report_id), exist_ok=True)
+
     @classmethod
     def _get_report_folder(cls, report_id: str) -> str:
         """获取报告文件夹路径"""
-        return os.path.join(cls.REPORTS_DIR, report_id)
+        return os.path.join(cls._reports_base(report_id), report_id)
     
     @classmethod
     def _ensure_report_folder(cls, report_id: str) -> str:
@@ -2426,10 +2481,15 @@ class ReportManager:
     def save_report(cls, report: Report) -> None:
         """保存报告元信息和完整报告"""
         cls._ensure_report_folder(report.report_id)
-        
-        # 保存元信息JSON
+
+        # 保存元信息JSON (include user_id for restart persistence)
+        data = report.to_dict()
+        with cls._user_registry_lock:
+            uid = cls._user_registry.get(report.report_id)
+        if uid:
+            data['user_id'] = uid
         with open(cls._get_report_path(report.report_id), 'w', encoding='utf-8') as f:
-            json.dump(report.to_dict(), f, ensure_ascii=False, indent=2)
+            json.dump(data, f, ensure_ascii=False, indent=2)
         
         # 保存大纲
         if report.outline:
@@ -2449,7 +2509,7 @@ class ReportManager:
         
         if not os.path.exists(path):
             # 兼容旧格式：检查直接存储在reports目录下的文件
-            old_path = os.path.join(cls.REPORTS_DIR, f"{report_id}.json")
+            old_path = os.path.join(cls._reports_base(report_id), f"{report_id}.json")
             if os.path.exists(old_path):
                 path = old_path
             else:
@@ -2457,7 +2517,14 @@ class ReportManager:
         
         with open(path, 'r', encoding='utf-8') as f:
             data = json.load(f)
-        
+
+        # Restore user_id into registry (survives restart)
+        persisted_uid = data.get('user_id')
+        if persisted_uid:
+            with cls._user_registry_lock:
+                if report_id not in cls._user_registry:
+                    cls._user_registry[report_id] = persisted_uid
+
         # 重建Report对象
         outline = None
         if data.get('outline'):
@@ -2496,12 +2563,13 @@ class ReportManager:
         )
     
     @classmethod
-    def get_report_by_simulation(cls, simulation_id: str) -> Optional[Report]:
+    def get_report_by_simulation(cls, simulation_id: str, user_id: str = None) -> Optional[Report]:
         """根据模拟ID获取报告"""
         cls._ensure_reports_dir()
-        
-        for item in os.listdir(cls.REPORTS_DIR):
-            item_path = os.path.join(cls.REPORTS_DIR, item)
+
+        base = cls._reports_base(user_id=user_id)
+        for item in os.listdir(base):
+            item_path = os.path.join(base, item)
             # 新格式：文件夹
             if os.path.isdir(item_path):
                 report = cls.get_report(item)
@@ -2517,13 +2585,14 @@ class ReportManager:
         return None
     
     @classmethod
-    def list_reports(cls, simulation_id: Optional[str] = None, limit: int = 50) -> List[Report]:
+    def list_reports(cls, simulation_id: Optional[str] = None, limit: int = 50, user_id: str = None) -> List[Report]:
         """列出报告"""
-        cls._ensure_reports_dir()
-        
+        base = cls._reports_base(user_id=user_id)
+        if not os.path.isdir(base):
+            return []
         reports = []
-        for item in os.listdir(cls.REPORTS_DIR):
-            item_path = os.path.join(cls.REPORTS_DIR, item)
+        for item in os.listdir(base):
+            item_path = os.path.join(base, item)
             # 新格式：文件夹
             if os.path.isdir(item_path):
                 report = cls.get_report(item)
@@ -2558,8 +2627,8 @@ class ReportManager:
         
         # 兼容旧格式：删除单独的文件
         deleted = False
-        old_json_path = os.path.join(cls.REPORTS_DIR, f"{report_id}.json")
-        old_md_path = os.path.join(cls.REPORTS_DIR, f"{report_id}.md")
+        old_json_path = os.path.join(cls._reports_base(report_id), f"{report_id}.json")
+        old_md_path = os.path.join(cls._reports_base(report_id), f"{report_id}.md")
         
         if os.path.exists(old_json_path):
             os.remove(old_json_path)

@@ -99,52 +99,54 @@ class Project:
 
 
 class ProjectManager:
-    """项目管理器 - 负责项目的持久化存储和检索"""
-    
-    # 项目存储根目录
-    PROJECTS_DIR = os.path.join(Config.UPLOAD_FOLDER, 'projects')
-    
+    """项目管理器 - 负责项目的持久化存储和检索
+
+    All path methods require a ``user_id`` to scope storage under
+    ``uploads/{user_id}/projects/``.
+    """
+
+    # Legacy class-level dir kept for reference; callers must use
+    # the user-scoped helpers below.
+    _LEGACY_PROJECTS_DIR = os.path.join(Config.UPLOAD_FOLDER, 'projects')
+
+    @staticmethod
+    def _projects_dir(user_id: str) -> str:
+        from ..utils.paths import user_projects_dir
+        return user_projects_dir(user_id)
+
     @classmethod
-    def _ensure_projects_dir(cls):
+    def _ensure_projects_dir(cls, user_id: str):
         """确保项目目录存在"""
-        os.makedirs(cls.PROJECTS_DIR, exist_ok=True)
-    
+        os.makedirs(cls._projects_dir(user_id), exist_ok=True)
+
     @classmethod
-    def _get_project_dir(cls, project_id: str) -> str:
+    def _get_project_dir(cls, user_id: str, project_id: str) -> str:
         """获取项目目录路径"""
-        return os.path.join(cls.PROJECTS_DIR, project_id)
-    
+        return os.path.join(cls._projects_dir(user_id), project_id)
+
     @classmethod
-    def _get_project_meta_path(cls, project_id: str) -> str:
+    def _get_project_meta_path(cls, user_id: str, project_id: str) -> str:
         """获取项目元数据文件路径"""
-        return os.path.join(cls._get_project_dir(project_id), 'project.json')
-    
+        return os.path.join(cls._get_project_dir(user_id, project_id), 'project.json')
+
     @classmethod
-    def _get_project_files_dir(cls, project_id: str) -> str:
+    def _get_project_files_dir(cls, user_id: str, project_id: str) -> str:
         """获取项目文件存储目录"""
-        return os.path.join(cls._get_project_dir(project_id), 'files')
-    
+        return os.path.join(cls._get_project_dir(user_id, project_id), 'files')
+
     @classmethod
-    def _get_project_text_path(cls, project_id: str) -> str:
+    def _get_project_text_path(cls, user_id: str, project_id: str) -> str:
         """获取项目提取文本存储路径"""
-        return os.path.join(cls._get_project_dir(project_id), 'extracted_text.txt')
-    
+        return os.path.join(cls._get_project_dir(user_id, project_id), 'extracted_text.txt')
+
     @classmethod
-    def create_project(cls, name: str = "Unnamed Project") -> Project:
-        """
-        创建新项目
-        
-        Args:
-            name: 项目名称
-            
-        Returns:
-            新创建的Project对象
-        """
-        cls._ensure_projects_dir()
-        
+    def create_project(cls, user_id: str, name: str = "Unnamed Project") -> Project:
+        """创建新项目"""
+        cls._ensure_projects_dir(user_id)
+
         project_id = f"proj_{uuid.uuid4().hex[:12]}"
         now = datetime.now().isoformat()
-        
+
         project = Project(
             project_id=project_id,
             name=name,
@@ -152,154 +154,132 @@ class ProjectManager:
             created_at=now,
             updated_at=now
         )
-        
+
         # 创建项目目录结构
-        project_dir = cls._get_project_dir(project_id)
-        files_dir = cls._get_project_files_dir(project_id)
+        project_dir = cls._get_project_dir(user_id, project_id)
+        files_dir = cls._get_project_files_dir(user_id, project_id)
         os.makedirs(project_dir, exist_ok=True)
         os.makedirs(files_dir, exist_ok=True)
-        
+
         # 保存项目元数据
-        cls.save_project(project)
-        
+        cls.save_project(user_id, project)
+
         return project
-    
+
     @classmethod
-    def save_project(cls, project: Project) -> None:
+    def save_project(cls, user_id: str, project: Project) -> None:
         """保存项目元数据"""
         project.updated_at = datetime.now().isoformat()
-        meta_path = cls._get_project_meta_path(project.project_id)
-        
+        meta_path = cls._get_project_meta_path(user_id, project.project_id)
+
         with open(meta_path, 'w', encoding='utf-8') as f:
             json.dump(project.to_dict(), f, ensure_ascii=False, indent=2)
-    
+
     @classmethod
-    def get_project(cls, project_id: str) -> Optional[Project]:
-        """
-        获取项目
-        
-        Args:
-            project_id: 项目ID
-            
-        Returns:
-            Project对象，如果不存在返回None
-        """
-        meta_path = cls._get_project_meta_path(project_id)
-        
+    def get_project(cls, user_id: str, project_id: str) -> Optional[Project]:
+        """获取项目"""
+        meta_path = cls._get_project_meta_path(user_id, project_id)
+
         if not os.path.exists(meta_path):
             return None
-        
+
         with open(meta_path, 'r', encoding='utf-8') as f:
             data = json.load(f)
-        
+
         return Project.from_dict(data)
-    
+
     @classmethod
-    def list_projects(cls, limit: int = 50) -> List[Project]:
-        """
-        列出所有项目
-        
-        Args:
-            limit: 返回数量限制
-            
-        Returns:
-            项目列表，按创建时间倒序
-        """
-        cls._ensure_projects_dir()
-        
+    def list_projects(cls, user_id: str, limit: int = 50) -> List[Project]:
+        """列出用户所有项目，按创建时间倒序"""
+        cls._ensure_projects_dir(user_id)
+
+        projects_dir = cls._projects_dir(user_id)
         projects = []
-        for project_id in os.listdir(cls.PROJECTS_DIR):
-            project = cls.get_project(project_id)
+        for project_id in os.listdir(projects_dir):
+            project = cls.get_project(user_id, project_id)
             if project:
                 projects.append(project)
-        
-        # 按创建时间倒序排序
+
         projects.sort(key=lambda p: p.created_at, reverse=True)
-        
         return projects[:limit]
-    
+
     @classmethod
-    def delete_project(cls, project_id: str) -> bool:
+    def find_project_by_graph_id(cls, user_id: str, graph_id: str) -> Optional[Project]:
+        """Find a project owned by *user_id* that has the given *graph_id*.
+
+        Returns the project if found, otherwise None.  Used to verify that
+        the caller actually owns the graph before operating on it.
         """
-        删除项目及其所有文件
-        
-        Args:
-            project_id: 项目ID
-            
-        Returns:
-            是否删除成功
-        """
-        project_dir = cls._get_project_dir(project_id)
-        
+        projects_dir = cls._projects_dir(user_id)
+        if not os.path.isdir(projects_dir):
+            return None
+        for project_id in os.listdir(projects_dir):
+            project = cls.get_project(user_id, project_id)
+            if project and project.graph_id == graph_id:
+                return project
+        return None
+
+    @classmethod
+    def delete_project(cls, user_id: str, project_id: str) -> bool:
+        """删除项目及其所有文件"""
+        project_dir = cls._get_project_dir(user_id, project_id)
+
         if not os.path.exists(project_dir):
             return False
-        
+
         shutil.rmtree(project_dir)
         return True
-    
+
     @classmethod
-    def save_file_to_project(cls, project_id: str, file_storage, original_filename: str) -> Dict[str, str]:
-        """
-        保存上传的文件到项目目录
-        
-        Args:
-            project_id: 项目ID
-            file_storage: Flask的FileStorage对象
-            original_filename: 原始文件名
-            
-        Returns:
-            文件信息字典 {filename, path, size}
-        """
-        files_dir = cls._get_project_files_dir(project_id)
+    def save_file_to_project(cls, user_id: str, project_id: str,
+                             file_storage, original_filename: str) -> Dict[str, str]:
+        """保存上传的文件到项目目录"""
+        files_dir = cls._get_project_files_dir(user_id, project_id)
         os.makedirs(files_dir, exist_ok=True)
-        
-        # 生成安全的文件名
+
         ext = os.path.splitext(original_filename)[1].lower()
         safe_filename = f"{uuid.uuid4().hex[:8]}{ext}"
         file_path = os.path.join(files_dir, safe_filename)
-        
-        # 保存文件
+
         file_storage.save(file_path)
-        
-        # 获取文件大小
         file_size = os.path.getsize(file_path)
-        
+
         return {
             "original_filename": original_filename,
             "saved_filename": safe_filename,
             "path": file_path,
             "size": file_size
         }
-    
+
     @classmethod
-    def save_extracted_text(cls, project_id: str, text: str) -> None:
+    def save_extracted_text(cls, user_id: str, project_id: str, text: str) -> None:
         """保存提取的文本"""
-        text_path = cls._get_project_text_path(project_id)
+        text_path = cls._get_project_text_path(user_id, project_id)
         with open(text_path, 'w', encoding='utf-8') as f:
             f.write(text)
-    
+
     @classmethod
-    def get_extracted_text(cls, project_id: str) -> Optional[str]:
+    def get_extracted_text(cls, user_id: str, project_id: str) -> Optional[str]:
         """获取提取的文本"""
-        text_path = cls._get_project_text_path(project_id)
-        
+        text_path = cls._get_project_text_path(user_id, project_id)
+
         if not os.path.exists(text_path):
             return None
-        
+
         with open(text_path, 'r', encoding='utf-8') as f:
             return f.read()
-    
+
     @classmethod
-    def get_project_files(cls, project_id: str) -> List[str]:
+    def get_project_files(cls, user_id: str, project_id: str) -> List[str]:
         """获取项目的所有文件路径"""
-        files_dir = cls._get_project_files_dir(project_id)
-        
+        files_dir = cls._get_project_files_dir(user_id, project_id)
+
         if not os.path.exists(files_dir):
             return []
-        
+
         return [
-            os.path.join(files_dir, f) 
-            for f in os.listdir(files_dir) 
+            os.path.join(files_dir, f)
+            for f in os.listdir(files_dir)
             if os.path.isfile(os.path.join(files_dir, f))
         ]
 

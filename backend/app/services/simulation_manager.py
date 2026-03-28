@@ -122,14 +122,10 @@ class SimulationManager:
     4. 准备预设脚本所需的所有文件
     """
     
-    # 模拟数据存储目录
-    SIMULATION_DATA_DIR = os.path.join(
-        os.path.dirname(__file__), 
-        '../../uploads/simulations'
-    )
-    
-    def __init__(self):
-        # 确保目录存在
+    def __init__(self, user_id: str):
+        from ..utils.paths import user_simulations_dir
+        self._user_id = user_id
+        self.SIMULATION_DATA_DIR = user_simulations_dir(user_id)
         os.makedirs(self.SIMULATION_DATA_DIR, exist_ok=True)
         
         # 内存中的模拟状态缓存

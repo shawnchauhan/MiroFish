@@ -33,6 +33,7 @@ class Task:
     error: Optional[str] = None    # 错误信息
     metadata: Dict = field(default_factory=dict)  # 额外元数据
     progress_detail: Dict = field(default_factory=dict)  # 详细进度信息
+    user_id: Optional[str] = None  # 任务所属用户
     
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典"""
@@ -48,6 +49,7 @@ class Task:
             "result": self.result,
             "error": self.error,
             "metadata": self.metadata,
+            "user_id": self.user_id,
         }
 
 
@@ -70,38 +72,46 @@ class TaskManager:
                     cls._instance._task_lock = threading.Lock()
         return cls._instance
     
-    def create_task(self, task_type: str, metadata: Optional[Dict] = None) -> str:
+    def create_task(self, task_type: str, metadata: Optional[Dict] = None,
+                    user_id: Optional[str] = None) -> str:
         """
         创建新任务
-        
+
         Args:
             task_type: 任务类型
             metadata: 额外元数据
-            
+            user_id: 任务所属用户（用于隔离访问）
+
         Returns:
             任务ID
         """
         task_id = str(uuid.uuid4())
         now = datetime.now()
-        
+
         task = Task(
             task_id=task_id,
             task_type=task_type,
             status=TaskStatus.PENDING,
             created_at=now,
             updated_at=now,
-            metadata=metadata or {}
+            metadata=metadata or {},
+            user_id=user_id,
         )
-        
+
         with self._task_lock:
             self._tasks[task_id] = task
-        
+
         return task_id
     
-    def get_task(self, task_id: str) -> Optional[Task]:
-        """获取任务"""
+    def get_task(self, task_id: str, user_id: Optional[str] = None) -> Optional[Task]:
+        """获取任务。当提供 *user_id* 时，仅返回属于该用户的任务。"""
         with self._task_lock:
-            return self._tasks.get(task_id)
+            task = self._tasks.get(task_id)
+            if task is None:
+                return None
+            if user_id is not None and task.user_id is not None and task.user_id != user_id:
+                return None
+            return task
     
     def update_task(
         self,
@@ -161,10 +171,13 @@ class TaskManager:
             error=error
         )
     
-    def list_tasks(self, task_type: Optional[str] = None) -> list:
-        """列出任务"""
+    def list_tasks(self, task_type: Optional[str] = None,
+                   user_id: Optional[str] = None) -> list:
+        """列出任务。当提供 *user_id* 时，仅返回属于该用户的任务。"""
         with self._task_lock:
             tasks = list(self._tasks.values())
+            if user_id is not None:
+                tasks = [t for t in tasks if t.user_id is None or t.user_id == user_id]
             if task_type:
                 tasks = [t for t in tasks if t.task_type == task_type]
             return [t.to_dict() for t in sorted(tasks, key=lambda x: x.created_at, reverse=True)]

@@ -9,6 +9,7 @@ import threading
 from flask import request, jsonify, send_file
 
 from . import report_bp
+from ..auth.helpers import get_current_user_id
 from ..config import Config
 from ..services.report_agent import ReportAgent, ReportManager, ReportStatus
 from ..services.simulation_manager import SimulationManager
@@ -17,6 +18,21 @@ from ..models.task import TaskManager, TaskStatus
 from ..utils.logger import get_logger
 
 logger = get_logger('mirofish.api.report')
+
+
+def _register_report_user(report_id: str):
+    """Register current user as owner of this report for path resolution."""
+    ReportManager.register_user(report_id, get_current_user_id())
+
+
+def _require_report_owner(report_id: str):
+    """Register + verify ownership.  Returns a 404 response if the current
+    user does not own *report_id*, otherwise None."""
+    uid = get_current_user_id()
+    ReportManager.register_user(report_id, uid)
+    if not ReportManager.verify_owner(report_id, uid):
+        return jsonify({"success": False, "error": "Report not found"}), 404
+    return None
 
 
 # ============== 报告生成接口 ==============
@@ -59,7 +75,7 @@ def generate_report():
         force_regenerate = data.get('force_regenerate', False)
         
         # 获取模拟信息
-        manager = SimulationManager()
+        manager = SimulationManager(get_current_user_id())
         state = manager.get_simulation(simulation_id)
         
         if not state:
@@ -70,7 +86,7 @@ def generate_report():
         
         # 检查是否已有报告
         if not force_regenerate:
-            existing_report = ReportManager.get_report_by_simulation(simulation_id)
+            existing_report = ReportManager.get_report_by_simulation(simulation_id, user_id=get_current_user_id())
             if existing_report and existing_report.status == ReportStatus.COMPLETED:
                 return jsonify({
                     "success": True,
@@ -84,7 +100,7 @@ def generate_report():
                 })
         
         # 获取项目信息
-        project = ProjectManager.get_project(state.project_id)
+        project = ProjectManager.get_project(get_current_user_id(),state.project_id)
         if not project:
             return jsonify({
                 "success": False,
@@ -108,7 +124,10 @@ def generate_report():
         # 提前生成 report_id，以便立即返回给前端
         import uuid
         report_id = f"report_{uuid.uuid4().hex[:12]}"
-        
+
+        # Register ownership for the new report (no verify -- it doesn't exist yet)
+        _register_report_user(report_id)
+
         # 创建异步任务
         task_manager = TaskManager()
         task_id = task_manager.create_task(
@@ -117,7 +136,8 @@ def generate_report():
                 "simulation_id": simulation_id,
                 "graph_id": graph_id,
                 "report_id": report_id
-            }
+            },
+            user_id=get_current_user_id(),
         )
         
         # 定义后台任务
@@ -187,11 +207,10 @@ def generate_report():
         })
         
     except Exception as e:
-        logger.error(f"启动报告生成任务失败: {str(e)}")
+        logger.error(f"Internal error: {e}", exc_info=True)
         return jsonify({
             "success": False,
-            "error": str(e),
-            "traceback": traceback.format_exc()
+            "error": "Internal server error"
         }), 500
 
 
@@ -225,7 +244,7 @@ def get_generate_status():
         
         # 如果提供了simulation_id，先检查是否已有完成的报告
         if simulation_id:
-            existing_report = ReportManager.get_report_by_simulation(simulation_id)
+            existing_report = ReportManager.get_report_by_simulation(simulation_id, user_id=get_current_user_id())
             if existing_report and existing_report.status == ReportStatus.COMPLETED:
                 return jsonify({
                     "success": True,
@@ -246,14 +265,15 @@ def get_generate_status():
             }), 400
         
         task_manager = TaskManager()
-        task = task_manager.get_task(task_id)
-        
+        uid = get_current_user_id()
+        task = task_manager.get_task(task_id, user_id=uid)
+
         if not task:
             return jsonify({
                 "success": False,
                 "error": f"任务不存在: {task_id}"
             }), 404
-        
+
         return jsonify({
             "success": True,
             "data": task.to_dict()
@@ -289,6 +309,9 @@ def get_report(report_id: str):
         }
     """
     try:
+        deny = _require_report_owner(report_id)
+        if deny:
+            return deny
         report = ReportManager.get_report(report_id)
         
         if not report:
@@ -303,11 +326,10 @@ def get_report(report_id: str):
         })
         
     except Exception as e:
-        logger.error(f"获取报告失败: {str(e)}")
+        logger.error(f"Internal error: {e}", exc_info=True)
         return jsonify({
             "success": False,
-            "error": str(e),
-            "traceback": traceback.format_exc()
+            "error": "Internal server error"
         }), 500
 
 
@@ -326,7 +348,7 @@ def get_report_by_simulation(simulation_id: str):
         }
     """
     try:
-        report = ReportManager.get_report_by_simulation(simulation_id)
+        report = ReportManager.get_report_by_simulation(simulation_id, user_id=get_current_user_id())
         
         if not report:
             return jsonify({
@@ -342,11 +364,10 @@ def get_report_by_simulation(simulation_id: str):
         })
         
     except Exception as e:
-        logger.error(f"获取报告失败: {str(e)}")
+        logger.error(f"Internal error: {e}", exc_info=True)
         return jsonify({
             "success": False,
-            "error": str(e),
-            "traceback": traceback.format_exc()
+            "error": "Internal server error"
         }), 500
 
 
@@ -372,7 +393,8 @@ def list_reports():
         
         reports = ReportManager.list_reports(
             simulation_id=simulation_id,
-            limit=limit
+            limit=limit,
+            user_id=get_current_user_id()
         )
         
         return jsonify({
@@ -382,11 +404,10 @@ def list_reports():
         })
         
     except Exception as e:
-        logger.error(f"列出报告失败: {str(e)}")
+        logger.error(f"Internal error: {e}", exc_info=True)
         return jsonify({
             "success": False,
-            "error": str(e),
-            "traceback": traceback.format_exc()
+            "error": "Internal server error"
         }), 500
 
 
@@ -398,6 +419,9 @@ def download_report(report_id: str):
     返回Markdown文件
     """
     try:
+        deny = _require_report_owner(report_id)
+        if deny:
+            return deny
         report = ReportManager.get_report(report_id)
         
         if not report:
@@ -411,10 +435,19 @@ def download_report(report_id: str):
         if not os.path.exists(md_path):
             # 如果MD文件不存在，生成一个临时文件
             import tempfile
+            from flask import after_this_request
             with tempfile.NamedTemporaryFile(mode='w', suffix='.md', delete=False) as f:
                 f.write(report.markdown_content)
                 temp_path = f.name
-            
+
+            @after_this_request
+            def _cleanup(response):
+                try:
+                    os.unlink(temp_path)
+                except OSError:
+                    pass
+                return response
+
             return send_file(
                 temp_path,
                 as_attachment=True,
@@ -428,11 +461,10 @@ def download_report(report_id: str):
         )
         
     except Exception as e:
-        logger.error(f"下载报告失败: {str(e)}")
+        logger.error(f"Internal error: {e}", exc_info=True)
         return jsonify({
             "success": False,
-            "error": str(e),
-            "traceback": traceback.format_exc()
+            "error": "Internal server error"
         }), 500
 
 
@@ -440,6 +472,9 @@ def download_report(report_id: str):
 def delete_report(report_id: str):
     """删除报告"""
     try:
+        deny = _require_report_owner(report_id)
+        if deny:
+            return deny
         success = ReportManager.delete_report(report_id)
         
         if not success:
@@ -454,11 +489,10 @@ def delete_report(report_id: str):
         })
         
     except Exception as e:
-        logger.error(f"删除报告失败: {str(e)}")
+        logger.error(f"Internal error: {e}", exc_info=True)
         return jsonify({
             "success": False,
-            "error": str(e),
-            "traceback": traceback.format_exc()
+            "error": "Internal server error"
         }), 500
 
 
@@ -511,7 +545,7 @@ def chat_with_report_agent():
             }), 400
         
         # 获取模拟和项目信息
-        manager = SimulationManager()
+        manager = SimulationManager(get_current_user_id())
         state = manager.get_simulation(simulation_id)
         
         if not state:
@@ -520,7 +554,7 @@ def chat_with_report_agent():
                 "error": f"模拟不存在: {simulation_id}"
             }), 404
         
-        project = ProjectManager.get_project(state.project_id)
+        project = ProjectManager.get_project(get_current_user_id(),state.project_id)
         if not project:
             return jsonify({
                 "success": False,
@@ -551,11 +585,10 @@ def chat_with_report_agent():
         })
         
     except Exception as e:
-        logger.error(f"对话失败: {str(e)}")
+        logger.error(f"Internal error: {e}", exc_info=True)
         return jsonify({
             "success": False,
-            "error": str(e),
-            "traceback": traceback.format_exc()
+            "error": "Internal server error"
         }), 500
 
 
@@ -580,6 +613,9 @@ def get_report_progress(report_id: str):
         }
     """
     try:
+        deny = _require_report_owner(report_id)
+        if deny:
+            return deny
         progress = ReportManager.get_progress(report_id)
         
         if not progress:
@@ -594,11 +630,10 @@ def get_report_progress(report_id: str):
         })
         
     except Exception as e:
-        logger.error(f"获取报告进度失败: {str(e)}")
+        logger.error(f"Internal error: {e}", exc_info=True)
         return jsonify({
             "success": False,
-            "error": str(e),
-            "traceback": traceback.format_exc()
+            "error": "Internal server error"
         }), 500
 
 
@@ -628,6 +663,9 @@ def get_report_sections(report_id: str):
         }
     """
     try:
+        deny = _require_report_owner(report_id)
+        if deny:
+            return deny
         sections = ReportManager.get_generated_sections(report_id)
         
         # 获取报告状态
@@ -645,11 +683,10 @@ def get_report_sections(report_id: str):
         })
         
     except Exception as e:
-        logger.error(f"获取章节列表失败: {str(e)}")
+        logger.error(f"Internal error: {e}", exc_info=True)
         return jsonify({
             "success": False,
-            "error": str(e),
-            "traceback": traceback.format_exc()
+            "error": "Internal server error"
         }), 500
 
 
@@ -668,6 +705,9 @@ def get_single_section(report_id: str, section_index: int):
         }
     """
     try:
+        deny = _require_report_owner(report_id)
+        if deny:
+            return deny
         section_path = ReportManager._get_section_path(report_id, section_index)
         
         if not os.path.exists(section_path):
@@ -689,11 +729,10 @@ def get_single_section(report_id: str, section_index: int):
         })
         
     except Exception as e:
-        logger.error(f"获取章节内容失败: {str(e)}")
+        logger.error(f"Internal error: {e}", exc_info=True)
         return jsonify({
             "success": False,
-            "error": str(e),
-            "traceback": traceback.format_exc()
+            "error": "Internal server error"
         }), 500
 
 
@@ -719,7 +758,7 @@ def check_report_status(simulation_id: str):
         }
     """
     try:
-        report = ReportManager.get_report_by_simulation(simulation_id)
+        report = ReportManager.get_report_by_simulation(simulation_id, user_id=get_current_user_id())
         
         has_report = report is not None
         report_status = report.status.value if report else None
@@ -740,11 +779,10 @@ def check_report_status(simulation_id: str):
         })
         
     except Exception as e:
-        logger.error(f"检查报告状态失败: {str(e)}")
+        logger.error(f"Internal error: {e}", exc_info=True)
         return jsonify({
             "success": False,
-            "error": str(e),
-            "traceback": traceback.format_exc()
+            "error": "Internal server error"
         }), 500
 
 
@@ -793,6 +831,9 @@ def get_agent_log(report_id: str):
     try:
         from_line = request.args.get('from_line', 0, type=int)
         
+        deny = _require_report_owner(report_id)
+        if deny:
+            return deny
         log_data = ReportManager.get_agent_log(report_id, from_line=from_line)
         
         return jsonify({
@@ -801,11 +842,10 @@ def get_agent_log(report_id: str):
         })
         
     except Exception as e:
-        logger.error(f"获取Agent日志失败: {str(e)}")
+        logger.error(f"Internal error: {e}", exc_info=True)
         return jsonify({
             "success": False,
-            "error": str(e),
-            "traceback": traceback.format_exc()
+            "error": "Internal server error"
         }), 500
 
 
@@ -824,6 +864,9 @@ def stream_agent_log(report_id: str):
         }
     """
     try:
+        deny = _require_report_owner(report_id)
+        if deny:
+            return deny
         logs = ReportManager.get_agent_log_stream(report_id)
         
         return jsonify({
@@ -835,11 +878,10 @@ def stream_agent_log(report_id: str):
         })
         
     except Exception as e:
-        logger.error(f"获取Agent日志失败: {str(e)}")
+        logger.error(f"Internal error: {e}", exc_info=True)
         return jsonify({
             "success": False,
-            "error": str(e),
-            "traceback": traceback.format_exc()
+            "error": "Internal server error"
         }), 500
 
 
@@ -875,6 +917,9 @@ def get_console_log(report_id: str):
     try:
         from_line = request.args.get('from_line', 0, type=int)
         
+        deny = _require_report_owner(report_id)
+        if deny:
+            return deny
         log_data = ReportManager.get_console_log(report_id, from_line=from_line)
         
         return jsonify({
@@ -883,11 +928,10 @@ def get_console_log(report_id: str):
         })
         
     except Exception as e:
-        logger.error(f"获取控制台日志失败: {str(e)}")
+        logger.error(f"Internal error: {e}", exc_info=True)
         return jsonify({
             "success": False,
-            "error": str(e),
-            "traceback": traceback.format_exc()
+            "error": "Internal server error"
         }), 500
 
 
@@ -906,6 +950,9 @@ def stream_console_log(report_id: str):
         }
     """
     try:
+        deny = _require_report_owner(report_id)
+        if deny:
+            return deny
         logs = ReportManager.get_console_log_stream(report_id)
         
         return jsonify({
@@ -917,11 +964,10 @@ def stream_console_log(report_id: str):
         })
         
     except Exception as e:
-        logger.error(f"获取控制台日志失败: {str(e)}")
+        logger.error(f"Internal error: {e}", exc_info=True)
         return jsonify({
             "success": False,
-            "error": str(e),
-            "traceback": traceback.format_exc()
+            "error": "Internal server error"
         }), 500
 
 
@@ -930,86 +976,86 @@ def stream_console_log(report_id: str):
 @report_bp.route('/tools/search', methods=['POST'])
 def search_graph_tool():
     """
-    图谱搜索工具接口（供调试使用）
-    
-    请求（JSON）：
-        {
-            "graph_id": "mirofish_xxxx",
-            "query": "搜索查询",
-            "limit": 10
-        }
+    图谱搜索工具接口 - 验证图谱所有权
     """
     try:
         data = request.get_json() or {}
-        
+
         graph_id = data.get('graph_id')
         query = data.get('query')
         limit = data.get('limit', 10)
-        
+
         if not graph_id or not query:
             return jsonify({
                 "success": False,
                 "error": "请提供 graph_id 和 query"
             }), 400
-        
+
+        uid = get_current_user_id()
+        if not ProjectManager.find_project_by_graph_id(uid, graph_id):
+            return jsonify({
+                "success": False,
+                "error": "Graph not found"
+            }), 404
+
         from ..services.zep_tools import ZepToolsService
-        
+
         tools = ZepToolsService()
         result = tools.search_graph(
             graph_id=graph_id,
             query=query,
             limit=limit
         )
-        
+
         return jsonify({
             "success": True,
             "data": result.to_dict()
         })
-        
+
     except Exception as e:
-        logger.error(f"图谱搜索失败: {str(e)}")
+        logger.error(f"Internal error: {e}", exc_info=True)
         return jsonify({
             "success": False,
-            "error": str(e),
-            "traceback": traceback.format_exc()
+            "error": "Internal server error"
         }), 500
 
 
 @report_bp.route('/tools/statistics', methods=['POST'])
 def get_graph_statistics_tool():
     """
-    图谱统计工具接口（供调试使用）
-    
-    请求（JSON）：
-        {
-            "graph_id": "mirofish_xxxx"
-        }
+    图谱统计工具接口 - 验证图谱所有权
     """
     try:
         data = request.get_json() or {}
-        
+
         graph_id = data.get('graph_id')
-        
+
         if not graph_id:
             return jsonify({
                 "success": False,
                 "error": "请提供 graph_id"
             }), 400
-        
+
+        uid = get_current_user_id()
+        if not ProjectManager.find_project_by_graph_id(uid, graph_id):
+            return jsonify({
+                "success": False,
+                "error": "Graph not found"
+            }), 404
+
         from ..services.zep_tools import ZepToolsService
-        
+
         tools = ZepToolsService()
         result = tools.get_graph_statistics(graph_id)
-        
+
         return jsonify({
             "success": True,
             "data": result
         })
-        
+
     except Exception as e:
-        logger.error(f"获取图谱统计失败: {str(e)}")
+        logger.error(f"Internal error: {e}", exc_info=True)
         return jsonify({
             "success": False,
-            "error": str(e),
-            "traceback": traceback.format_exc()
+            "error": "Internal server error"
         }), 500

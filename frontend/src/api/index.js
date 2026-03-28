@@ -4,6 +4,7 @@ import axios from 'axios'
 const service = axios.create({
   baseURL: import.meta.env.VITE_API_BASE_URL || 'http://localhost:5001',
   timeout: 300000, // 5分钟超时（本体生成可能需要较长时间）
+  withCredentials: true,
   headers: {
     'Content-Type': 'application/json'
   }
@@ -24,28 +25,37 @@ service.interceptors.request.use(
 service.interceptors.response.use(
   response => {
     const res = response.data
-    
+
     // 如果返回的状态码不是success，则抛出错误
     if (!res.success && res.success !== undefined) {
       console.error('API Error:', res.error || res.message || 'Unknown error')
       return Promise.reject(new Error(res.error || res.message || 'Error'))
     }
-    
+
     return res
   },
   error => {
     console.error('Response error:', error)
-    
+
+    // 401 Unauthorized -- redirect to login
+    if (error.response && error.response.status === 401) {
+      const currentPath = window.location.pathname
+      if (currentPath !== '/login') {
+        window.location.href = `/login?redirect=${encodeURIComponent(currentPath)}`
+      }
+      return Promise.reject(error)
+    }
+
     // 处理超时
     if (error.code === 'ECONNABORTED' && error.message.includes('timeout')) {
       console.error('Request timeout')
     }
-    
+
     // 处理网络错误
     if (error.message === 'Network Error') {
       console.error('Network error - please check your connection')
     }
-    
+
     return Promise.reject(error)
   }
 )
