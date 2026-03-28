@@ -415,13 +415,15 @@ def prepare_simulation():
         
         manager = SimulationManager(get_current_user_id())
         state = manager.get_simulation(simulation_id)
-        
+
         if not state:
             return jsonify({
                 "success": False,
                 "error": f"模拟不存在: {simulation_id}"
             }), 404
-        
+
+        _register_sim_user(simulation_id)
+
         # 检查是否强制重新生成
         force_regenerate = data.get('force_regenerate', False)
         logger.info(f"开始处理 /prepare 请求: simulation_id={simulation_id}, force_regenerate={force_regenerate}")
@@ -1521,6 +1523,8 @@ def start_simulation():
                 "success": False,
                 "error": f"模拟不存在: {simulation_id}"
             }), 404
+
+        _register_sim_user(simulation_id)
 
         force_restarted = False
         

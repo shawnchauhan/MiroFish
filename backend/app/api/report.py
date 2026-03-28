@@ -114,7 +114,9 @@ def generate_report():
         # 提前生成 report_id，以便立即返回给前端
         import uuid
         report_id = f"report_{uuid.uuid4().hex[:12]}"
-        
+
+        _register_report_user(report_id)
+
         # 创建异步任务
         task_manager = TaskManager()
         task_id = task_manager.create_task(
