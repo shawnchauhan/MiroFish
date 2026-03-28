@@ -40,17 +40,17 @@ class ReportLogger:
     每行是一个完整的 JSON 对象，包含时间戳、动作类型、详细内容等。
     """
     
-    def __init__(self, report_id: str):
+    def __init__(self, report_id: str, user_id: str = None):
         """
         初始化日志记录器
-        
+
         Args:
             report_id: 报告ID，用于确定日志文件路径
+            user_id: 用户ID，用于确定用户目录
         """
         self.report_id = report_id
-        self.log_file_path = os.path.join(
-            Config.UPLOAD_FOLDER, 'reports', report_id, 'agent_log.jsonl'
-        )
+        base = ReportManager._reports_base(report_id, user_id=user_id)
+        self.log_file_path = os.path.join(base, report_id, 'agent_log.jsonl')
         self.start_time = datetime.now()
         self._ensure_log_file()
     
@@ -311,17 +311,17 @@ class ReportConsoleLogger:
     这些日志与 agent_log.jsonl 不同，是纯文本格式的控制台输出。
     """
     
-    def __init__(self, report_id: str):
+    def __init__(self, report_id: str, user_id: str = None):
         """
         初始化控制台日志记录器
-        
+
         Args:
             report_id: 报告ID，用于确定日志文件路径
+            user_id: 用户ID，用于确定用户目录
         """
         self.report_id = report_id
-        self.log_file_path = os.path.join(
-            Config.UPLOAD_FOLDER, 'reports', report_id, 'console_log.txt'
-        )
+        base = ReportManager._reports_base(report_id, user_id=user_id)
+        self.log_file_path = os.path.join(base, report_id, 'console_log.txt')
         self._ensure_log_file()
         self._file_handler = None
         self._setup_file_handler()
@@ -1898,18 +1898,35 @@ class ReportManager:
         full_report.md     - 完整报告
     """
     
-    # 报告存储目录
-    REPORTS_DIR = os.path.join(Config.UPLOAD_FOLDER, 'reports')
-    
+    # Legacy dir; use _reports_dir(report_id) instead
+    _LEGACY_REPORTS_DIR = os.path.join(Config.UPLOAD_FOLDER, 'reports')
+
+    # report_id -> user_id registry
+    _user_registry: Dict[str, str] = {}
+
     @classmethod
-    def _ensure_reports_dir(cls):
+    def register_user(cls, report_id: str, user_id: str):
+        """Register which user owns a report (call from API layer)."""
+        cls._user_registry[report_id] = user_id
+
+    @classmethod
+    def _reports_base(cls, report_id: str = None, user_id: str = None) -> str:
+        """Get reports base dir, resolving user from registry if available."""
+        uid = user_id or (cls._user_registry.get(report_id) if report_id else None)
+        if uid:
+            from ..utils.paths import user_reports_dir
+            return user_reports_dir(uid)
+        return cls._LEGACY_REPORTS_DIR
+
+    @classmethod
+    def _ensure_reports_dir(cls, report_id: str = None):
         """确保报告根目录存在"""
-        os.makedirs(cls.REPORTS_DIR, exist_ok=True)
-    
+        os.makedirs(cls._reports_base(report_id), exist_ok=True)
+
     @classmethod
     def _get_report_folder(cls, report_id: str) -> str:
         """获取报告文件夹路径"""
-        return os.path.join(cls.REPORTS_DIR, report_id)
+        return os.path.join(cls._reports_base(report_id), report_id)
     
     @classmethod
     def _ensure_report_folder(cls, report_id: str) -> str:
@@ -2449,7 +2466,7 @@ class ReportManager:
         
         if not os.path.exists(path):
             # 兼容旧格式：检查直接存储在reports目录下的文件
-            old_path = os.path.join(cls.REPORTS_DIR, f"{report_id}.json")
+            old_path = os.path.join(cls._reports_base(report_id), f"{report_id}.json")
             if os.path.exists(old_path):
                 path = old_path
             else:
@@ -2496,12 +2513,13 @@ class ReportManager:
         )
     
     @classmethod
-    def get_report_by_simulation(cls, simulation_id: str) -> Optional[Report]:
+    def get_report_by_simulation(cls, simulation_id: str, user_id: str = None) -> Optional[Report]:
         """根据模拟ID获取报告"""
         cls._ensure_reports_dir()
-        
-        for item in os.listdir(cls.REPORTS_DIR):
-            item_path = os.path.join(cls.REPORTS_DIR, item)
+
+        base = cls._reports_base(user_id=user_id)
+        for item in os.listdir(base):
+            item_path = os.path.join(base, item)
             # 新格式：文件夹
             if os.path.isdir(item_path):
                 report = cls.get_report(item)
@@ -2517,13 +2535,14 @@ class ReportManager:
         return None
     
     @classmethod
-    def list_reports(cls, simulation_id: Optional[str] = None, limit: int = 50) -> List[Report]:
+    def list_reports(cls, simulation_id: Optional[str] = None, limit: int = 50, user_id: str = None) -> List[Report]:
         """列出报告"""
         cls._ensure_reports_dir()
-        
+
+        base = cls._reports_base(user_id=user_id)
         reports = []
-        for item in os.listdir(cls.REPORTS_DIR):
-            item_path = os.path.join(cls.REPORTS_DIR, item)
+        for item in os.listdir(base):
+            item_path = os.path.join(base, item)
             # 新格式：文件夹
             if os.path.isdir(item_path):
                 report = cls.get_report(item)
@@ -2558,8 +2577,8 @@ class ReportManager:
         
         # 兼容旧格式：删除单独的文件
         deleted = False
-        old_json_path = os.path.join(cls.REPORTS_DIR, f"{report_id}.json")
-        old_md_path = os.path.join(cls.REPORTS_DIR, f"{report_id}.md")
+        old_json_path = os.path.join(cls._reports_base(report_id), f"{report_id}.json")
+        old_md_path = os.path.join(cls._reports_base(report_id), f"{report_id}.md")
         
         if os.path.exists(old_json_path):
             os.remove(old_json_path)

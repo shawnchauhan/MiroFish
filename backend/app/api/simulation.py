@@ -8,6 +8,7 @@ import traceback
 from flask import request, jsonify, send_file
 
 from . import simulation_bp
+from ..auth.helpers import get_current_user_id
 from ..config import Config
 from ..services.zep_entity_reader import ZepEntityReader
 from ..services.oasis_profile_generator import OasisProfileGenerator
@@ -17,6 +18,12 @@ from ..utils.logger import get_logger
 from ..models.project import ProjectManager
 
 logger = get_logger('mirofish.api.simulation')
+
+
+def _register_sim_user(simulation_id: str):
+    """Register current user as owner of this simulation for path resolution."""
+    _register_sim_user(simulation_id)
+    SimulationRunner.register_user(simulation_id, get_current_user_id())
 
 
 # Interview prompt 优化前缀
@@ -200,7 +207,7 @@ def create_simulation():
                 "error": "请提供 project_id"
             }), 400
         
-        project = ProjectManager.get_project(project_id)
+        project = ProjectManager.get_project(get_current_user_id(),project_id)
         if not project:
             return jsonify({
                 "success": False,
@@ -214,7 +221,7 @@ def create_simulation():
                 "error": "项目尚未构建图谱，请先调用 /api/graph/build"
             }), 400
         
-        manager = SimulationManager()
+        manager = SimulationManager(get_current_user_id())
         state = manager.create_simulation(
             project_id=project_id,
             graph_id=graph_id,
@@ -411,7 +418,7 @@ def prepare_simulation():
                 "error": "请提供 simulation_id"
             }), 400
         
-        manager = SimulationManager()
+        manager = SimulationManager(get_current_user_id())
         state = manager.get_simulation(simulation_id)
         
         if not state:
@@ -445,7 +452,7 @@ def prepare_simulation():
                 logger.info(f"模拟 {simulation_id} 未准备完成，将启动准备任务")
         
         # 从项目获取必要信息
-        project = ProjectManager.get_project(state.project_id)
+        project = ProjectManager.get_project(get_current_user_id(),state.project_id)
         if not project:
             return jsonify({
                 "success": False,
@@ -461,7 +468,7 @@ def prepare_simulation():
             }), 400
         
         # 获取文档文本
-        document_text = ProjectManager.get_extracted_text(state.project_id) or ""
+        document_text = ProjectManager.get_extracted_text(get_current_user_id(),state.project_id) or ""
         
         entity_types_list = data.get('entity_types')
         use_llm_for_profiles = data.get('use_llm_for_profiles', True)
@@ -751,7 +758,7 @@ def get_prepare_status():
 def get_simulation(simulation_id: str):
     """获取模拟状态"""
     try:
-        manager = SimulationManager()
+        manager = SimulationManager(get_current_user_id())
         state = manager.get_simulation(simulation_id)
         
         if not state:
@@ -791,7 +798,7 @@ def list_simulations():
     try:
         project_id = request.args.get('project_id')
         
-        manager = SimulationManager()
+        manager = SimulationManager(get_current_user_id())
         simulations = manager.list_simulations(project_id=project_id)
         
         return jsonify({
@@ -906,7 +913,7 @@ def get_simulation_history():
     try:
         limit = request.args.get('limit', 20, type=int)
         
-        manager = SimulationManager()
+        manager = SimulationManager(get_current_user_id())
         simulations = manager.list_simulations()[:limit]
         
         # 增强模拟数据，只从 Simulation 文件读取
@@ -931,6 +938,7 @@ def get_simulation_history():
                 recommended_rounds = 0
             
             # 获取运行状态（从 run_state.json 读取用户设置的实际轮数）
+            _register_sim_user(simulation_id)
             run_state = SimulationRunner.get_run_state(sim.simulation_id)
             if run_state:
                 sim_dict["current_round"] = run_state.current_round
@@ -943,7 +951,7 @@ def get_simulation_history():
                 sim_dict["total_rounds"] = recommended_rounds
             
             # 获取关联项目的文件列表（最多3个）
-            project = ProjectManager.get_project(sim.project_id)
+            project = ProjectManager.get_project(get_current_user_id(),sim.project_id)
             if project and hasattr(project, 'files') and project.files:
                 sim_dict["files"] = [
                     {"filename": f.get("filename", "未知文件")} 
@@ -993,7 +1001,7 @@ def get_simulation_profiles(simulation_id: str):
     try:
         platform = request.args.get('platform', 'reddit')
         
-        manager = SimulationManager()
+        manager = SimulationManager(get_current_user_id())
         profiles = manager.get_profiles(simulation_id, platform=platform)
         
         return jsonify({
@@ -1263,7 +1271,7 @@ def get_simulation_config(simulation_id: str):
         - generation_reasoning: LLM的配置推理说明
     """
     try:
-        manager = SimulationManager()
+        manager = SimulationManager(get_current_user_id())
         config = manager.get_simulation_config(simulation_id)
         
         if not config:
@@ -1290,7 +1298,7 @@ def get_simulation_config(simulation_id: str):
 def download_simulation_config(simulation_id: str):
     """下载模拟配置文件"""
     try:
-        manager = SimulationManager()
+        manager = SimulationManager(get_current_user_id())
         sim_dir = manager._get_simulation_dir(simulation_id)
         config_path = os.path.join(sim_dir, "simulation_config.json")
         
@@ -1521,7 +1529,7 @@ def start_simulation():
             }), 400
 
         # 检查模拟是否已准备好
-        manager = SimulationManager()
+        manager = SimulationManager(get_current_user_id())
         state = manager.get_simulation(simulation_id)
 
         if not state:
@@ -1541,6 +1549,7 @@ def start_simulation():
                 # 准备工作已完成，检查是否有正在运行的进程
                 if state.status == SimulationStatus.RUNNING:
                     # 检查模拟进程是否真的在运行
+                    _register_sim_user(simulation_id)
                     run_state = SimulationRunner.get_run_state(simulation_id)
                     if run_state and run_state.runner_status.value == "running":
                         # 进程确实在运行
@@ -1583,7 +1592,7 @@ def start_simulation():
             graph_id = state.graph_id
             if not graph_id:
                 # 尝试从项目中获取
-                project = ProjectManager.get_project(state.project_id)
+                project = ProjectManager.get_project(get_current_user_id(),state.project_id)
                 if project:
                     graph_id = project.graph_id
             
@@ -1666,10 +1675,11 @@ def stop_simulation():
                 "error": "请提供 simulation_id"
             }), 400
         
+        _register_sim_user(simulation_id)
         run_state = SimulationRunner.stop_simulation(simulation_id)
         
         # 更新模拟状态
-        manager = SimulationManager()
+        manager = SimulationManager(get_current_user_id())
         state = manager.get_simulation(simulation_id)
         if state:
             state.status = SimulationStatus.PAUSED
@@ -1724,6 +1734,7 @@ def get_run_status(simulation_id: str):
         }
     """
     try:
+        _register_sim_user(simulation_id)
         run_state = SimulationRunner.get_run_state(simulation_id)
         
         if not run_state:
@@ -1793,6 +1804,7 @@ def get_run_status_detail(simulation_id: str):
         }
     """
     try:
+        _register_sim_user(simulation_id)
         run_state = SimulationRunner.get_run_state(simulation_id)
         platform_filter = request.args.get('platform')
         
@@ -1884,6 +1896,7 @@ def get_simulation_actions(simulation_id: str):
         agent_id = request.args.get('agent_id', type=int)
         round_num = request.args.get('round_num', type=int)
         
+        _register_sim_user(simulation_id)
         actions = SimulationRunner.get_actions(
             simulation_id=simulation_id,
             limit=limit,
@@ -1927,6 +1940,7 @@ def get_simulation_timeline(simulation_id: str):
         start_round = request.args.get('start_round', 0, type=int)
         end_round = request.args.get('end_round', type=int)
         
+        _register_sim_user(simulation_id)
         timeline = SimulationRunner.get_timeline(
             simulation_id=simulation_id,
             start_round=start_round,
@@ -1958,6 +1972,7 @@ def get_agent_stats(simulation_id: str):
     用于前端展示Agent活跃度排行、动作分布等
     """
     try:
+        _register_sim_user(simulation_id)
         stats = SimulationRunner.get_agent_stats(simulation_id)
         
         return jsonify({
@@ -2220,6 +2235,7 @@ def interview_agent():
             }), 400
         
         # 检查环境状态
+        _register_sim_user(simulation_id)
         if not SimulationRunner.check_env_alive(simulation_id):
             return jsonify({
                 "success": False,
@@ -2355,6 +2371,7 @@ def interview_agents_batch():
                 }), 400
 
         # 检查环境状态
+        _register_sim_user(simulation_id)
         if not SimulationRunner.check_env_alive(simulation_id):
             return jsonify({
                 "success": False,
@@ -2462,6 +2479,7 @@ def interview_all_agents():
             }), 400
 
         # 检查环境状态
+        _register_sim_user(simulation_id)
         if not SimulationRunner.check_env_alive(simulation_id):
             return jsonify({
                 "success": False,
@@ -2552,6 +2570,7 @@ def get_interview_history():
                 "error": "请提供 simulation_id"
             }), 400
 
+        _register_sim_user(simulation_id)
         history = SimulationRunner.get_interview_history(
             simulation_id=simulation_id,
             platform=platform,
@@ -2611,6 +2630,7 @@ def get_env_status():
                 "error": "请提供 simulation_id"
             }), 400
 
+        _register_sim_user(simulation_id)
         env_alive = SimulationRunner.check_env_alive(simulation_id)
         
         # 获取更详细的状态信息
@@ -2679,13 +2699,14 @@ def close_simulation_env():
                 "error": "请提供 simulation_id"
             }), 400
         
+        _register_sim_user(simulation_id)
         result = SimulationRunner.close_simulation_env(
             simulation_id=simulation_id,
             timeout=timeout
         )
         
         # 更新模拟状态
-        manager = SimulationManager()
+        manager = SimulationManager(get_current_user_id())
         state = manager.get_simulation(simulation_id)
         if state:
             state.status = SimulationStatus.COMPLETED

@@ -9,6 +9,7 @@ import threading
 from flask import request, jsonify, send_file
 
 from . import report_bp
+from ..auth.helpers import get_current_user_id
 from ..config import Config
 from ..services.report_agent import ReportAgent, ReportManager, ReportStatus
 from ..services.simulation_manager import SimulationManager
@@ -17,6 +18,11 @@ from ..models.task import TaskManager, TaskStatus
 from ..utils.logger import get_logger
 
 logger = get_logger('mirofish.api.report')
+
+
+def _register_report_user(report_id: str):
+    """Register current user as owner of this report for path resolution."""
+    ReportManager.register_user(report_id, get_current_user_id())
 
 
 # ============== 报告生成接口 ==============
@@ -59,7 +65,7 @@ def generate_report():
         force_regenerate = data.get('force_regenerate', False)
         
         # 获取模拟信息
-        manager = SimulationManager()
+        manager = SimulationManager(get_current_user_id())
         state = manager.get_simulation(simulation_id)
         
         if not state:
@@ -70,7 +76,7 @@ def generate_report():
         
         # 检查是否已有报告
         if not force_regenerate:
-            existing_report = ReportManager.get_report_by_simulation(simulation_id)
+            existing_report = ReportManager.get_report_by_simulation(simulation_id, user_id=get_current_user_id())
             if existing_report and existing_report.status == ReportStatus.COMPLETED:
                 return jsonify({
                     "success": True,
@@ -84,7 +90,7 @@ def generate_report():
                 })
         
         # 获取项目信息
-        project = ProjectManager.get_project(state.project_id)
+        project = ProjectManager.get_project(get_current_user_id(),state.project_id)
         if not project:
             return jsonify({
                 "success": False,
@@ -225,7 +231,7 @@ def get_generate_status():
         
         # 如果提供了simulation_id，先检查是否已有完成的报告
         if simulation_id:
-            existing_report = ReportManager.get_report_by_simulation(simulation_id)
+            existing_report = ReportManager.get_report_by_simulation(simulation_id, user_id=get_current_user_id())
             if existing_report and existing_report.status == ReportStatus.COMPLETED:
                 return jsonify({
                     "success": True,
@@ -289,6 +295,7 @@ def get_report(report_id: str):
         }
     """
     try:
+        _register_report_user(report_id)
         report = ReportManager.get_report(report_id)
         
         if not report:
@@ -326,7 +333,7 @@ def get_report_by_simulation(simulation_id: str):
         }
     """
     try:
-        report = ReportManager.get_report_by_simulation(simulation_id)
+        report = ReportManager.get_report_by_simulation(simulation_id, user_id=get_current_user_id())
         
         if not report:
             return jsonify({
@@ -372,7 +379,8 @@ def list_reports():
         
         reports = ReportManager.list_reports(
             simulation_id=simulation_id,
-            limit=limit
+            limit=limit,
+            user_id=get_current_user_id()
         )
         
         return jsonify({
@@ -398,6 +406,7 @@ def download_report(report_id: str):
     返回Markdown文件
     """
     try:
+        _register_report_user(report_id)
         report = ReportManager.get_report(report_id)
         
         if not report:
@@ -440,6 +449,7 @@ def download_report(report_id: str):
 def delete_report(report_id: str):
     """删除报告"""
     try:
+        _register_report_user(report_id)
         success = ReportManager.delete_report(report_id)
         
         if not success:
@@ -511,7 +521,7 @@ def chat_with_report_agent():
             }), 400
         
         # 获取模拟和项目信息
-        manager = SimulationManager()
+        manager = SimulationManager(get_current_user_id())
         state = manager.get_simulation(simulation_id)
         
         if not state:
@@ -520,7 +530,7 @@ def chat_with_report_agent():
                 "error": f"模拟不存在: {simulation_id}"
             }), 404
         
-        project = ProjectManager.get_project(state.project_id)
+        project = ProjectManager.get_project(get_current_user_id(),state.project_id)
         if not project:
             return jsonify({
                 "success": False,
@@ -580,6 +590,7 @@ def get_report_progress(report_id: str):
         }
     """
     try:
+        _register_report_user(report_id)
         progress = ReportManager.get_progress(report_id)
         
         if not progress:
@@ -628,6 +639,7 @@ def get_report_sections(report_id: str):
         }
     """
     try:
+        _register_report_user(report_id)
         sections = ReportManager.get_generated_sections(report_id)
         
         # 获取报告状态
@@ -668,6 +680,7 @@ def get_single_section(report_id: str, section_index: int):
         }
     """
     try:
+        _register_report_user(report_id)
         section_path = ReportManager._get_section_path(report_id, section_index)
         
         if not os.path.exists(section_path):
@@ -719,7 +732,7 @@ def check_report_status(simulation_id: str):
         }
     """
     try:
-        report = ReportManager.get_report_by_simulation(simulation_id)
+        report = ReportManager.get_report_by_simulation(simulation_id, user_id=get_current_user_id())
         
         has_report = report is not None
         report_status = report.status.value if report else None
@@ -793,6 +806,7 @@ def get_agent_log(report_id: str):
     try:
         from_line = request.args.get('from_line', 0, type=int)
         
+        _register_report_user(report_id)
         log_data = ReportManager.get_agent_log(report_id, from_line=from_line)
         
         return jsonify({
@@ -824,6 +838,7 @@ def stream_agent_log(report_id: str):
         }
     """
     try:
+        _register_report_user(report_id)
         logs = ReportManager.get_agent_log_stream(report_id)
         
         return jsonify({
@@ -875,6 +890,7 @@ def get_console_log(report_id: str):
     try:
         from_line = request.args.get('from_line', 0, type=int)
         
+        _register_report_user(report_id)
         log_data = ReportManager.get_console_log(report_id, from_line=from_line)
         
         return jsonify({
@@ -906,6 +922,7 @@ def stream_console_log(report_id: str):
         }
     """
     try:
+        _register_report_user(report_id)
         logs = ReportManager.get_console_log_stream(report_id)
         
         return jsonify({
