@@ -4,13 +4,6 @@ All notable changes to MiroFish will be documented in this file.
 
 ## [0.2.0.1] - 2026-03-28
 
-### Fixed
-- Missing `_register_sim_user` calls in `prepare_simulation` and `start_simulation` endpoints
-- Missing `_register_report_user` call in `generate_report` endpoint
-- User-scoped file storage now works correctly for all write paths when `AUTH_ENABLED=true`
-
-## [0.2.0.0] - 2026-03-28
-
 ### Added
 - OAuth2 authentication with Google and GitHub providers via Authlib
 - SQLite user model with Flask-Login integration and atomic upsert
@@ -28,3 +21,6 @@ All notable changes to MiroFish will be documented in this file.
 - `not_configured` Zep status no longer falsely reports `degraded`
 - Raw exceptions no longer leak on public `/health` endpoint
 - Cross-user directory scans removed from SimulationRunner and ReportManager
+- Missing `_register_sim_user` calls on prepare/start simulation paths
+- Missing `_register_report_user` call on generate report path
+- Incorrect loop variable in `get_simulation_history` user registration
