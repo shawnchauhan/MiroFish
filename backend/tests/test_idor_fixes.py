@@ -295,6 +295,113 @@ class TestReportToolEndpointOwnership(unittest.TestCase):
         self.assertEqual(resp.status_code, 404)
 
 
+class TestEntityEndpointOwnership(unittest.TestCase):
+    """Test that entity read endpoints enforce graph ownership."""
+
+    def setUp(self):
+        self._tmpdir = tempfile.mkdtemp()
+        self._env_patcher = patch.dict(os.environ, {
+            'AUTH_ENABLED': 'false',
+        })
+        self._env_patcher.start()
+
+        from app import create_app
+        from app.config import Config
+
+        class _TestConfig(Config):
+            TESTING = True
+            SECRET_KEY = 'test-secret-key-that-is-at-least-32-characters-long'
+            UPLOAD_FOLDER = self._tmpdir
+            ZEP_API_KEY = 'fake-zep-key'
+
+        self.app = create_app(_TestConfig)
+        self.client = self.app.test_client()
+
+    def tearDown(self):
+        self._env_patcher.stop()
+        shutil.rmtree(self._tmpdir, ignore_errors=True)
+
+    def test_get_entities_no_ownership(self):
+        """GET /api/simulation/entities/<graph_id> returns 404 for unowned graph."""
+        resp = self.client.get('/api/simulation/entities/graph-not-mine')
+        self.assertEqual(resp.status_code, 404)
+
+    def test_get_entity_detail_no_ownership(self):
+        """GET /api/simulation/entities/<graph_id>/<uuid> returns 404 for unowned graph."""
+        resp = self.client.get('/api/simulation/entities/graph-not-mine/some-uuid')
+        self.assertEqual(resp.status_code, 404)
+
+    def test_get_entities_by_type_no_ownership(self):
+        """GET /api/simulation/entities/<graph_id>/by-type/<type> returns 404 for unowned graph."""
+        resp = self.client.get('/api/simulation/entities/graph-not-mine/by-type/Person')
+        self.assertEqual(resp.status_code, 404)
+
+    def test_generate_profiles_no_ownership(self):
+        """POST /api/simulation/generate-profiles returns 404 for unowned graph."""
+        resp = self.client.post('/api/simulation/generate-profiles',
+                                json={'graph_id': 'graph-not-mine'})
+        self.assertEqual(resp.status_code, 404)
+
+    def test_get_entities_with_ownership(self):
+        """GET /api/simulation/entities/<graph_id> succeeds for owned graph."""
+        with patch('app.models.project.Config.UPLOAD_FOLDER', self._tmpdir):
+            project = ProjectManager.create_project('dev-local-user', 'Test')
+            project.graph_id = 'graph-owned'
+            ProjectManager.save_project('dev-local-user', project)
+
+        with patch('app.api.simulation.ZepEntityReader') as MockReader:
+            mock_result = MagicMock()
+            mock_result.to_dict.return_value = {'entities': [], 'count': 0}
+            MockReader.return_value.filter_defined_entities.return_value = mock_result
+            resp = self.client.get('/api/simulation/entities/graph-owned')
+            self.assertEqual(resp.status_code, 200)
+
+
+class TestTaskPollingUserScoping(unittest.TestCase):
+    """Test that task polling endpoints pass user_id to get_task."""
+
+    def setUp(self):
+        self._tmpdir = tempfile.mkdtemp()
+        self._env_patcher = patch.dict(os.environ, {
+            'AUTH_ENABLED': 'false',
+        })
+        self._env_patcher.start()
+
+        from app import create_app
+        from app.config import Config
+
+        class _TestConfig(Config):
+            TESTING = True
+            SECRET_KEY = 'test-secret-key-that-is-at-least-32-characters-long'
+            UPLOAD_FOLDER = self._tmpdir
+            ZEP_API_KEY = 'fake-zep-key'
+
+        self.app = create_app(_TestConfig)
+        self.client = self.app.test_client()
+
+    def tearDown(self):
+        self._env_patcher.stop()
+        shutil.rmtree(self._tmpdir, ignore_errors=True)
+
+    def test_report_status_uses_user_id(self):
+        """POST /api/report/generate/status passes user_id to get_task."""
+        with patch('app.api.report.TaskManager') as MockTM:
+            mock_tm = MockTM.return_value
+            mock_tm.get_task.return_value = None
+            resp = self.client.post('/api/report/generate/status',
+                                    json={'task_id': 'some-task'})
+            mock_tm.get_task.assert_called_once_with('some-task', user_id='dev-local-user')
+
+    def test_simulation_prepare_status_uses_user_id(self):
+        """POST /api/simulation/prepare/status passes user_id to get_task."""
+        with patch('app.models.task.TaskManager') as MockTM:
+            mock_tm = MockTM.return_value
+            mock_tm.get_task.return_value = None
+            resp = self.client.post('/api/simulation/prepare/status',
+                                    json={'task_id': 'some-task'})
+            mock_tm.get_task.assert_called_once_with('some-task', user_id='dev-local-user')
+
+
 class TestDevUserIdFlowthrough(unittest.TestCase):
     """Verify auth-disabled mode (dev-local-user) still flows correctly."""
 

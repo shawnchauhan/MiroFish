@@ -265,14 +265,15 @@ def get_generate_status():
             }), 400
         
         task_manager = TaskManager()
-        task = task_manager.get_task(task_id)
-        
+        uid = get_current_user_id()
+        task = task_manager.get_task(task_id, user_id=uid)
+
         if not task:
             return jsonify({
                 "success": False,
                 "error": f"任务不存在: {task_id}"
             }), 404
-        
+
         return jsonify({
             "success": True,
             "data": task.to_dict()

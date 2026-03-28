@@ -77,13 +77,20 @@ def get_graph_entities(graph_id: str):
                 "success": False,
                 "error": "ZEP_API_KEY未配置"
             }), 500
-        
+
+        uid = get_current_user_id()
+        if not ProjectManager.find_project_by_graph_id(uid, graph_id):
+            return jsonify({
+                "success": False,
+                "error": "Graph not found"
+            }), 404
+
         entity_types_str = request.args.get('entity_types', '')
         entity_types = [t.strip() for t in entity_types_str.split(',') if t.strip()] if entity_types_str else None
         enrich = request.args.get('enrich', 'true').lower() == 'true'
-        
+
         logger.info(f"获取图谱实体: graph_id={graph_id}, entity_types={entity_types}, enrich={enrich}")
-        
+
         reader = ZepEntityReader()
         result = reader.filter_defined_entities(
             graph_id=graph_id,
@@ -113,7 +120,14 @@ def get_entity_detail(graph_id: str, entity_uuid: str):
                 "success": False,
                 "error": "ZEP_API_KEY未配置"
             }), 500
-        
+
+        uid = get_current_user_id()
+        if not ProjectManager.find_project_by_graph_id(uid, graph_id):
+            return jsonify({
+                "success": False,
+                "error": "Graph not found"
+            }), 404
+
         reader = ZepEntityReader()
         entity = reader.get_entity_with_context(graph_id, entity_uuid)
         
@@ -145,9 +159,16 @@ def get_entities_by_type(graph_id: str, entity_type: str):
                 "success": False,
                 "error": "ZEP_API_KEY未配置"
             }), 500
-        
+
+        uid = get_current_user_id()
+        if not ProjectManager.find_project_by_graph_id(uid, graph_id):
+            return jsonify({
+                "success": False,
+                "error": "Graph not found"
+            }), 404
+
         enrich = request.args.get('enrich', 'true').lower() == 'true'
-        
+
         reader = ZepEntityReader()
         entities = reader.get_entities_by_type(
             graph_id=graph_id,
@@ -724,8 +745,9 @@ def get_prepare_status():
             }), 400
         
         task_manager = TaskManager()
-        task = task_manager.get_task(task_id)
-        
+        uid = get_current_user_id()
+        task = task_manager.get_task(task_id, user_id=uid)
+
         if not task:
             # 任务不存在，但如果有simulation_id，检查是否已准备完成
             if simulation_id:
@@ -1413,7 +1435,14 @@ def generate_profiles():
                 "success": False,
                 "error": "请提供 graph_id"
             }), 400
-        
+
+        uid = get_current_user_id()
+        if not ProjectManager.find_project_by_graph_id(uid, graph_id):
+            return jsonify({
+                "success": False,
+                "error": "Graph not found"
+            }), 404
+
         entity_types = data.get('entity_types')
         use_llm = data.get('use_llm', True)
         platform = data.get('platform', 'reddit')
