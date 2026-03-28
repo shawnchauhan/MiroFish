@@ -9,13 +9,12 @@ import os
 from flask import Blueprint, jsonify, redirect, request, session, url_for
 from flask_login import current_user, login_user, logout_user
 
-from ..auth.oauth import oauth
+from ..auth.oauth import PROVIDERS, oauth
 from ..models.user import User
 
 auth_bp = Blueprint('auth', __name__)
 
-# Allowed OAuth providers (keep in sync with oauth.py PROVIDERS)
-_VALID_PROVIDERS = {'google', 'github'}
+_VALID_PROVIDERS = set(PROVIDERS.keys())
 
 
 def _auth_enabled():
