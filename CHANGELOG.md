@@ -31,3 +31,7 @@ All notable changes to MiroFish will be documented in this file.
 - SQLite `busy_timeout` pragma added for concurrent access reliability
 - `_VALID_PROVIDERS` derived from PROVIDERS dict instead of hardcoded
 - Test SECRET_KEY lengthened to satisfy 32-char minimum validation
+- Removed 3 legacy unauthenticated fallback paths with latent path traversal risk
+- App version in simulation history now read from pyproject.toml instead of hardcoded
+- pyproject.toml version synced to 0.2.1.0
+- Version test reads expected value from pyproject.toml dynamically
