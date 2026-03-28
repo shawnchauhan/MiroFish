@@ -27,7 +27,8 @@ def create_app(config_class=Config):
     """Flask应用工厂函数"""
     app = Flask(__name__)
     app.config.from_object(config_class)
-    
+    app.config['_START_TIME'] = time.monotonic()
+
     # 设置JSON编码：确保中文直接显示（而不是 \uXXXX 格式）
     # Flask >= 2.3 使用 app.json.ensure_ascii，旧版本使用 JSON_AS_ASCII 配置
     if hasattr(app, 'json') and hasattr(app.json, 'ensure_ascii'):
@@ -123,8 +124,7 @@ def create_app(config_class=Config):
     app.register_blueprint(simulation_bp, url_prefix='/api/simulation')
     app.register_blueprint(report_bp, url_prefix='/api/report')
     
-    # Startup bookkeeping for /health
-    app.config['_START_TIME'] = time.monotonic()
+    # Read version from pyproject.toml for /health
     pyproject_path = Path(__file__).parent.parent / 'pyproject.toml'
     try:
         with open(pyproject_path, 'rb') as f:
@@ -140,7 +140,7 @@ def create_app(config_class=Config):
         minutes, seconds = divmod(remainder, 60)
 
         zep_status = _check_zep()
-        overall = 'ok' if zep_status.get('status') == 'ok' else 'degraded'
+        overall = 'degraded' if zep_status.get('status') == 'error' else 'ok'
 
         return {
             'status': overall,
@@ -162,18 +162,31 @@ def create_app(config_class=Config):
     return app
 
 
+_zep_cache = {'result': None, 'expires': 0.0}
+
+
 def _check_zep():
-    """Lightweight Zep Cloud connectivity check with 2s timeout."""
+    """Lightweight Zep Cloud connectivity check with 2s timeout and 30s cache."""
+    now = time.monotonic()
+    if _zep_cache['result'] is not None and now < _zep_cache['expires']:
+        return _zep_cache['result']
+
     api_key = Config.ZEP_API_KEY
     if not api_key:
-        return {'status': 'not_configured'}
-    try:
-        from zep_cloud.client import Zep
-        start = time.monotonic()
-        client = Zep(api_key=api_key, timeout=2.0)
-        client.graph.list_all(page_size=1)
-        latency = round((time.monotonic() - start) * 1000)
-        return {'status': 'ok', 'latency_ms': latency}
-    except Exception as e:
-        return {'status': 'error', 'message': str(e)[:200]}
+        result = {'status': 'not_configured'}
+    else:
+        try:
+            from zep_cloud.client import Zep
+            start = time.monotonic()
+            client = Zep(api_key=api_key, timeout=2.0)
+            client.graph.list_all(page_size=1)
+            latency = round((time.monotonic() - start) * 1000)
+            result = {'status': 'ok', 'latency_ms': latency}
+        except Exception as e:
+            get_logger('mirofish').warning('Zep connectivity check failed: %s', e)
+            result = {'status': 'error', 'message': 'connectivity check failed'}
+
+    _zep_cache['result'] = result
+    _zep_cache['expires'] = now + 30.0
+    return result
 

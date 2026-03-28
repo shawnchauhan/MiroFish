@@ -2,11 +2,10 @@
 Tests for the enhanced /health endpoint.
 """
 
-import re
 import time
 import unittest
 from datetime import datetime, timezone
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 from app import create_app
 
@@ -58,10 +57,11 @@ class TestHealthEndpoint(unittest.TestCase):
         self.assertIn('status', zep)
         self.assertIn(zep['status'], ('ok', 'error', 'not_configured'))
 
-    @patch('app.Config')
-    def test_zep_not_configured_when_no_key(self, mock_config):
-        from app import _check_zep
-        mock_config.ZEP_API_KEY = ''
+    @patch('app.Config.ZEP_API_KEY', None)
+    def test_zep_not_configured_when_no_key(self):
+        from app import _check_zep, _zep_cache
+        _zep_cache['result'] = None  # Clear cache to force fresh check
+        _zep_cache['expires'] = 0.0
         result = _check_zep()
         self.assertEqual(result['status'], 'not_configured')
 
@@ -78,10 +78,10 @@ class TestHealthEndpoint(unittest.TestCase):
         self.assertEqual(data['status'], 'degraded')
 
     @patch('app._check_zep')
-    def test_overall_status_degraded_when_zep_not_configured(self, mock_zep):
+    def test_overall_status_ok_when_zep_not_configured(self, mock_zep):
         mock_zep.return_value = {'status': 'not_configured'}
         data = self.client.get('/health').get_json()
-        self.assertEqual(data['status'], 'degraded')
+        self.assertEqual(data['status'], 'ok')
 
     def test_health_accessible_without_auth(self):
         """Health endpoint must be accessible even with AUTH_ENABLED=true."""
