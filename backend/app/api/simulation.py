@@ -238,26 +238,28 @@ def create_simulation():
         }), 500
 
 
-def _check_simulation_prepared(simulation_id: str) -> tuple:
+def _check_simulation_prepared(simulation_id: str, user_id: str = None) -> tuple:
     """
     检查模拟是否已经准备完成
-    
+
     检查条件：
     1. state.json 存在且 status 为 "ready"
     2. 必要文件存在：reddit_profiles.json, twitter_profiles.csv, simulation_config.json
-    
+
     注意：运行脚本(run_*.py)保留在 backend/scripts/ 目录，不再复制到模拟目录
-    
+
     Args:
         simulation_id: 模拟ID
-        
+        user_id: 用户ID (defaults to current user)
+
     Returns:
         (is_prepared: bool, info: dict)
     """
     import os
-    from ..config import Config
-    
-    simulation_dir = os.path.join(Config.OASIS_SIMULATION_DATA_DIR, simulation_id)
+    from ..utils.paths import user_simulations_dir
+
+    uid = user_id or get_current_user_id()
+    simulation_dir = os.path.join(user_simulations_dir(uid), simulation_id)
     
     # 检查目录是否存在
     if not os.path.exists(simulation_dir):
@@ -1054,16 +1056,19 @@ def get_simulation_profiles_realtime(simulation_id: str):
     
     try:
         platform = request.args.get('platform', 'reddit')
-        
-        # 获取模拟目录
-        sim_dir = os.path.join(Config.OASIS_SIMULATION_DATA_DIR, simulation_id)
-        
+
+        _register_sim_user(simulation_id)
+
+        # 获取模拟目录 (user-scoped)
+        from ..utils.paths import user_simulations_dir
+        sim_dir = os.path.join(user_simulations_dir(get_current_user_id()), simulation_id)
+
         if not os.path.exists(sim_dir):
             return jsonify({
                 "success": False,
                 "error": f"模拟不存在: {simulation_id}"
             }), 404
-        
+
         # 确定文件路径
         if platform == "reddit":
             profiles_file = os.path.join(sim_dir, "reddit_profiles.json")
@@ -1157,15 +1162,18 @@ def get_simulation_config_realtime(simulation_id: str):
     from datetime import datetime
     
     try:
-        # 获取模拟目录
-        sim_dir = os.path.join(Config.OASIS_SIMULATION_DATA_DIR, simulation_id)
-        
+        _register_sim_user(simulation_id)
+
+        # 获取模拟目录 (user-scoped)
+        from ..utils.paths import user_simulations_dir
+        sim_dir = os.path.join(user_simulations_dir(get_current_user_id()), simulation_id)
+
         if not os.path.exists(sim_dir):
             return jsonify({
                 "success": False,
                 "error": f"模拟不存在: {simulation_id}"
             }), 404
-        
+
         # 配置文件路径
         config_file = os.path.join(sim_dir, "simulation_config.json")
         
