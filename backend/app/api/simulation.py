@@ -429,7 +429,6 @@ def prepare_simulation():
         logger.info(f"开始处理 /prepare 请求: simulation_id={simulation_id}, force_regenerate={force_regenerate}")
         
         # 检查是否已经准备完成（避免重复生成）
-        _register_sim_user(simulation_id)
         if not force_regenerate:
             logger.debug(f"检查模拟 {simulation_id} 是否已准备完成...")
             is_prepared, prepare_info = _check_simulation_prepared(simulation_id)
@@ -1538,7 +1537,6 @@ def start_simulation():
                 # 准备工作已完成，检查是否有正在运行的进程
                 if state.status == SimulationStatus.RUNNING:
                     # 检查模拟进程是否真的在运行
-                    _register_sim_user(simulation_id)
                     run_state = SimulationRunner.get_run_state(simulation_id)
                     if run_state and run_state.runner_status.value == "running":
                         # 进程确实在运行
@@ -1594,7 +1592,6 @@ def start_simulation():
             logger.info(f"启用图谱记忆更新: simulation_id={simulation_id}, graph_id={graph_id}")
         
         # 启动模拟
-        _register_sim_user(simulation_id)
         run_state = SimulationRunner.start_simulation(
             simulation_id=simulation_id,
             platform=platform,
