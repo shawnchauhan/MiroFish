@@ -28,7 +28,7 @@ async function handleLogout() {
 </script>
 
 <style>
-/* 全局样式重置 */
+/* Global style reset */
 * {
   margin: 0;
   padding: 0;
@@ -36,14 +36,14 @@ async function handleLogout() {
 }
 
 #app {
-  font-family: 'JetBrains Mono', 'Space Grotesk', 'Noto Sans SC', monospace;
+  font-family: 'JetBrains Mono', 'Space Grotesk', monospace;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   color: #000000;
   background-color: #ffffff;
 }
 
-/* 滚动条样式 */
+/* Scrollbar styles */
 ::-webkit-scrollbar {
   width: 8px;
   height: 8px;
@@ -61,7 +61,7 @@ async function handleLogout() {
   background: #333333;
 }
 
-/* 全局按钮样式 */
+/* Global button styles */
 button {
   font-family: inherit;
 }
