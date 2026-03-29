@@ -2,6 +2,15 @@
 
 All notable changes to MiroFish will be documented in this file.
 
+## [0.2.2.0] - 2026-03-29
+
+### Changed
+- Translated entire codebase from Chinese to English (63 files, ~14K lines)
+- All backend Python source: comments, docstrings, error messages, log messages, LLM prompts, variable names
+- All frontend Vue/JS source: UI labels, placeholder text, status messages, component comments
+- Configuration files: .env.example descriptions, Docker labels, package.json metadata
+- Resolved remaining Chinese language artifacts missed in initial translation pass
+
 ## [0.2.1.1] - 2026-03-28
 
 ### Fixed
