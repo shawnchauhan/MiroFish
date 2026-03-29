@@ -2,7 +2,11 @@
 
 All notable changes to MiroFish will be documented in this file.
 
-## [0.2.2.0] - 2026-03-29
+## [0.2.3.0] - 2026-03-29
+
+### Fixed
+- Show error banner on project load and generation failures in MainView
+- Add 404 catch-all route for unknown paths with NotFound page
 
 ### Changed
 - Translated entire codebase from Chinese to English (63 files, ~14K lines)
