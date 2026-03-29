@@ -584,7 +584,7 @@ Field descriptions:
 - work_hours (int array): Work hours
 - reasoning (string): Brief explanation of why this configuration was chosen"""
 
-        system_prompt = "You are a social media simulation expert. Return pure JSON format. Time configuration should follow Chinese daily activity patterns."
+        system_prompt = "You are a social media simulation expert. Return pure JSON format. Time configuration should follow realistic daily activity patterns for the target demographic."
         
         try:
             return self._call_llm_with_retry(prompt, system_prompt)
@@ -593,7 +593,7 @@ Field descriptions:
             return self._get_default_time_config(num_entities)
     
     def _get_default_time_config(self, num_entities: int) -> Dict[str, Any]:
-        """Get default time configuration (Chinese daily routines)."""
+        """Get default time configuration."""
         return {
             "total_simulation_hours": 72,
             "minutes_per_round": 60,  # 1 hour per round, accelerated time flow

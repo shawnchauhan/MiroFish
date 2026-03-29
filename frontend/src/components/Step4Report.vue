@@ -2006,8 +2006,8 @@ const getActionLabel = (action) => {
 }
 
 const getLogLevelClass = (log) => {
-  if (log.includes('ERROR') || log.includes('error')) return 'error'
-  if (log.includes('WARNING') || log.includes('warning')) return 'warning'
+  if (log.includes('ERROR') || log.startsWith('error:') || log.startsWith('Error:')) return 'error'
+  if (log.includes('WARNING') || log.startsWith('warning:') || log.startsWith('Warning:')) return 'warning'
   // INFO uses default color, not marked as success
   return ''
 }

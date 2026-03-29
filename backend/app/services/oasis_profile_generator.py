@@ -670,7 +670,7 @@ class OasisProfileGenerator:
 
     def _get_system_prompt(self, is_individual: bool) -> str:
         """Get the system prompt."""
-        base_prompt = "You are an expert in generating social media user profiles. Create detailed, realistic personas for public opinion simulation that faithfully reproduce known real-world information. You must return valid JSON. All string values must not contain unescaped newline characters. Write in Chinese."
+        base_prompt = "You are an expert in generating social media user profiles. Create detailed, realistic personas for public opinion simulation that faithfully reproduce known real-world information. You must return valid JSON. All string values must not contain unescaped newline characters. Write in English."
         return base_prompt
     
     def _build_individual_persona_prompt(
@@ -717,7 +717,7 @@ Generate a JSON object with the following fields:
 Important:
 - All field values must be strings or numbers; do not use newline characters
 - persona must be a single coherent text description
-- Write in Chinese (except the gender field, which must be English "male" or "female")
+- Write in English (the gender field must be "male" or "female")
 - Content must be consistent with the entity information
 - age must be a valid integer, gender must be "male" or "female"
 """
@@ -766,7 +766,7 @@ Generate a JSON object with the following fields:
 Important:
 - All field values must be strings or numbers; null values are not allowed
 - persona must be a single coherent text description; do not use newline characters
-- Write in Chinese (except the gender field, which must be English "other")
+- Write in English (the gender field must be "other")
 - age must be the integer 30, gender must be the string "other"
 - Institutional account posts must be consistent with the organization's identity and role"""
     

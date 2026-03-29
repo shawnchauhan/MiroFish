@@ -319,14 +319,14 @@ class AgentInterview:
                 # Filter out junk content containing question numbers (Question 1-9)
                 skip = False
                 for d in '123456789':
-                    if f'\u95ee\u9898{d}' in clean_quote:
+                    if f'Question{d}' in clean_quote or f'question{d}' in clean_quote:
                         skip = True
                         break
                 if skip:
                     continue
                 # Truncate overly long content (break at period, not hard-cut)
                 if len(clean_quote) > 150:
-                    dot_pos = clean_quote.find('\u3002', 80)
+                    dot_pos = clean_quote.find('.', 80)
                     if dot_pos > 0:
                         clean_quote = clean_quote[:dot_pos + 1]
                     else:
@@ -1428,10 +1428,10 @@ Return the sub-questions in JSON format."""
                 clean_text = re.sub(r'\{[^}]*tool_name[^}]*\}', '', clean_text)
                 clean_text = re.sub(r'[*_`|>~\-]{2,}', '', clean_text)
                 clean_text = re.sub(r'Question\s*\d+[：:]\s*', '', clean_text, flags=re.IGNORECASE)
-                clean_text = re.sub(r'\[[^\]]+\]', '', clean_text)
+                clean_text = re.sub(r'【[^】]+】', '', clean_text)
 
                 # Strategy 1 (primary): Extract complete, substantive sentences
-                sentences = re.split(r'[.!?。！？]', clean_text)
+                sentences = re.split(r'(?<=[.!?。！？])\s+', clean_text)
                 meaningful = [
                     s.strip() for s in sentences
                     if 20 <= len(s.strip()) <= 150
