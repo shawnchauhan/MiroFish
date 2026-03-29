@@ -33,6 +33,13 @@
       </div>
     </header>
 
+    <!-- Error Banner -->
+    <div v-if="error" class="error-banner">
+      <span class="error-icon">!</span>
+      <span class="error-text">{{ error }}</span>
+      <button class="error-action" @click="router.push('/')">Back to Home</button>
+    </div>
+
     <!-- Main Content Area -->
     <main class="content-area">
       <!-- Left Panel: Graph -->
@@ -220,6 +227,8 @@ const handleNewProject = async () => {
     }
   } catch (err) {
     error.value = err.message
+    ontologyProgress.value = null
+    currentPhase.value = -1
     addLog(`Exception in handleNewProject: ${err.message}`)
   } finally {
     loading.value = false
@@ -412,6 +421,51 @@ onUnmounted(() => {
   background: #FFF;
   overflow: hidden;
   font-family: 'Space Grotesk', system-ui, sans-serif;
+}
+
+/* Error Banner */
+.error-banner {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem 1.5rem;
+  background: #FFF0F0;
+  border-bottom: 1px solid #FFD4D4;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.85rem;
+}
+
+.error-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #FF4444;
+  color: #FFF;
+  font-weight: 700;
+  font-size: 0.75rem;
+  flex-shrink: 0;
+}
+
+.error-text {
+  flex: 1;
+  color: #CC0000;
+}
+
+.error-action {
+  padding: 0.4rem 1rem;
+  background: #1a1a1a;
+  color: #FFF;
+  border: none;
+  font-family: inherit;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.error-action:hover {
+  background: #333;
 }
 
 /* Header */
