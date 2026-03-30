@@ -9,12 +9,14 @@ import threading
 from flask import request, jsonify, send_file
 
 from . import report_bp
+from .. import limiter
 from ..auth.helpers import get_current_user_id
 from ..config import Config
 from ..services.report_agent import ReportAgent, ReportManager, ReportStatus
 from ..services.simulation_manager import SimulationManager
 from ..models.project import ProjectManager
 from ..models.task import TaskManager, TaskStatus
+from ..utils.input_validator import validate_chat_message, validate_chat_history
 from ..utils.logger import get_logger
 
 logger = get_logger('mirofish.api.report')
@@ -38,6 +40,7 @@ def _require_report_owner(report_id: str):
 # ============== Report Generation Endpoints ==============
 
 @report_bp.route('/generate', methods=['POST'])
+@limiter.limit("5 per minute")
 def generate_report():
     """
     Generate simulation analysis report (async task)
@@ -499,6 +502,7 @@ def delete_report(report_id: str):
 # ============== Report Agent Chat Endpoints ==============
 
 @report_bp.route('/chat', methods=['POST'])
+@limiter.limit("10 per minute")
 def chat_with_report_agent():
     """
     Chat with the Report Agent
@@ -527,22 +531,22 @@ def chat_with_report_agent():
     """
     try:
         data = request.get_json() or {}
-        
+
         simulation_id = data.get('simulation_id')
-        message = data.get('message')
-        chat_history = data.get('chat_history', [])
-        
+        raw_message = data.get('message')
+        raw_history = data.get('chat_history', [])
+
         if not simulation_id:
             return jsonify({
                 "success": False,
                 "error": "Please provide simulation_id"
             }), 400
-        
-        if not message:
-            return jsonify({
-                "success": False,
-                "error": "Please provide message"
-            }), 400
+
+        message, msg_err = validate_chat_message(raw_message)
+        if msg_err:
+            return jsonify({"success": False, "error": msg_err}), 400
+
+        chat_history, _ = validate_chat_history(raw_history)
         
         # Get simulation and project info
         manager = SimulationManager(get_current_user_id())

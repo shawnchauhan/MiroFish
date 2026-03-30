@@ -6,7 +6,8 @@ const service = axios.create({
   timeout: 300000, // 5-minute timeout (ontology generation may take a long time)
   withCredentials: true,
   headers: {
-    'Content-Type': 'application/json'
+    'Content-Type': 'application/json',
+    'X-Requested-With': 'XMLHttpRequest'
   }
 })
 

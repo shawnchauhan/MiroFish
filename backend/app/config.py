@@ -4,6 +4,7 @@ Loads configuration from the project root .env file
 """
 
 import os
+import secrets
 from dotenv import load_dotenv
 
 # Load .env file from project root
@@ -21,8 +22,8 @@ class Config:
     """Flask configuration class"""
 
     # Flask configuration
-    SECRET_KEY = os.environ.get('SECRET_KEY') or 'mirofish-secret-key'
-    DEBUG = os.environ.get('FLASK_DEBUG', 'True').lower() == 'true'
+    SECRET_KEY = os.environ.get('SECRET_KEY') or secrets.token_hex(32)
+    DEBUG = os.environ.get('FLASK_DEBUG', 'false').lower() == 'true'
     
     # JSON configuration - disable ASCII escaping so non-ASCII characters display directly (not as \uXXXX)
     JSON_AS_ASCII = False

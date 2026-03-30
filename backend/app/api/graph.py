@@ -9,6 +9,7 @@ import threading
 from flask import request, jsonify
 
 from . import graph_bp
+from .. import limiter
 from ..auth.helpers import get_current_user_id
 from ..config import Config
 from ..services.ontology_generator import OntologyGenerator
@@ -18,6 +19,7 @@ from ..utils.file_parser import FileParser
 from ..utils.logger import get_logger
 from ..models.task import TaskManager, TaskStatus
 from ..models.project import ProjectManager, ProjectStatus
+from ..utils.input_validator import validate_simulation_requirement, validate_chunk_params
 
 # Get logger
 logger = get_logger('mirofish.api')
@@ -124,6 +126,7 @@ def reset_project(project_id: str):
 # ============== Endpoint 1: Upload Files and Generate Ontology ==============
 
 @graph_bp.route('/ontology/generate', methods=['POST'])
+@limiter.limit("5 per minute")
 def generate_ontology():
     """
     Endpoint 1: Upload files and generate ontology definition
@@ -154,19 +157,17 @@ def generate_ontology():
     try:
         logger.info("=== Starting ontology generation ===")
 
-        # Get parameters
-        simulation_requirement = request.form.get('simulation_requirement', '')
+        # Get and validate parameters
+        raw_requirement = request.form.get('simulation_requirement', '')
+        simulation_requirement, req_err = validate_simulation_requirement(raw_requirement)
+        if req_err:
+            return jsonify({"success": False, "error": req_err}), 400
+
         project_name = request.form.get('project_name', 'Unnamed Project')
         additional_context = request.form.get('additional_context', '')
-        
+
         logger.debug(f"Project name: {project_name}")
         logger.debug(f"Simulation requirement: {simulation_requirement[:100]}...")
-        
-        if not simulation_requirement:
-            return jsonify({
-                "success": False,
-                "error": "Please provide a simulation requirement description (simulation_requirement)"
-            }), 400
         
         # Get uploaded files
         uploaded_files = request.files.getlist('files')
@@ -343,11 +344,14 @@ def build_graph():
             project.graph_build_task_id = None
             project.error = None
         
-        # Get configuration
+        # Get and validate configuration
         graph_name = data.get('graph_name', project.name or 'MiroFish Graph')
-        chunk_size = data.get('chunk_size', project.chunk_size or Config.DEFAULT_CHUNK_SIZE)
-        chunk_overlap = data.get('chunk_overlap', project.chunk_overlap or Config.DEFAULT_CHUNK_OVERLAP)
-        
+        raw_size = data.get('chunk_size', project.chunk_size or Config.DEFAULT_CHUNK_SIZE)
+        raw_overlap = data.get('chunk_overlap', project.chunk_overlap or Config.DEFAULT_CHUNK_OVERLAP)
+        chunk_size, chunk_overlap, chunk_err = validate_chunk_params(raw_size, raw_overlap)
+        if chunk_err:
+            return jsonify({"success": False, "error": chunk_err}), 400
+
         # Update project configuration
         project.chunk_size = chunk_size
         project.chunk_overlap = chunk_overlap
