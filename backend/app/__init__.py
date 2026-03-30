@@ -147,8 +147,12 @@ def create_app(config_class=Config):
         content_type = request.content_type or ''
         has_custom_header = request.headers.get('X-Requested-With') == 'XMLHttpRequest'
         is_json = 'application/json' in content_type
-        is_multipart = 'multipart/form-data' in content_type
-        if not (has_custom_header or is_json or is_multipart):
+        # Note: multipart/form-data is NOT checked here because it is a
+        # "simple" content type that HTML forms can send cross-origin
+        # without triggering CORS preflight.  The frontend axios client
+        # always sends X-Requested-With: XMLHttpRequest (even on multipart
+        # uploads), so has_custom_header covers that case.
+        if not (has_custom_header or is_json):
             return jsonify({'error': 'Missing required request header'}), 403
 
     # Request logging middleware
