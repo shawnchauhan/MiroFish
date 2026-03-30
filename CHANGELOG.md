@@ -2,6 +2,18 @@
 
 All notable changes to MiroFish will be documented in this file.
 
+## [0.2.4.0] - 2026-03-30
+
+### Fixed
+- CSRF protection no longer bypasses checks for multipart/form-data requests (cross-site form attack vector)
+- Input validation added across all API endpoints via centralized `InputValidator` utility
+- Content Security Policy headers now restrict script/style/font/image sources with nonces
+- Rate limiting applied to authentication and sensitive API endpoints
+- Security headers hardened: X-Content-Type-Options, X-Frame-Options, Referrer-Policy, Permissions-Policy
+- Cookie security flags set: HttpOnly, Secure, SameSite=Lax
+- Frontend HTML output sanitized via DOMPurify to prevent stored XSS
+- `.env.example` scrubbed of real API key values
+
 ## [0.2.3.0] - 2026-03-29
 
 ### Fixed
