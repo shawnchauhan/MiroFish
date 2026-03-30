@@ -170,7 +170,7 @@ OASIS simulations run as separate Python processes (`backend/scripts/run_*.py`).
 - **Frontend:** Vue 3 Composition API with `<script setup>`, standard Vue conventions
 - **Backend:** Flask blueprints, Python type hints where practical, PEP 8
 - **Naming:** camelCase in frontend JS, snake_case in backend Python
-- **No test framework currently configured** — contributions adding tests are welcome
+- **Testing:** pytest with 80+ tests covering user model, route protection, health endpoint, IDOR fixes, and path helpers. Run with `cd backend && python -m pytest tests/ -v`
 
 ## License
 

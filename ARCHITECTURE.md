@@ -96,7 +96,7 @@ MiroFish/
 │   ├── src/
 │   │   ├── main.js           # App entry, mounts Vue + Router
 │   │   ├── App.vue           # Root component (just <router-view>)
-│   │   ├── router/index.js   # 6 routes: Home, Process, Simulation, SimulationRun, Report, Interaction
+│   │   ├── router/index.js   # 7 routes: Home, Process, Simulation, SimulationRun, Report, Interaction, NotFound (404 catch-all)
 │   │   ├── api/              # Axios API clients
 │   │   │   ├── index.js      # Axios instance (baseURL localhost:5001, 5min timeout, retry logic)
 │   │   │   ├── graph.js      # Graph API calls (ontology, build, task status, graph data)
@@ -108,7 +108,8 @@ MiroFish/
 │   │   │   ├── SimulationView.vue
 │   │   │   ├── SimulationRunView.vue
 │   │   │   ├── ReportView.vue
-│   │   │   └── InteractionView.vue
+│   │   │   ├── InteractionView.vue
+│   │   │   └── NotFound.vue           # 404 catch-all page
 │   │   ├── components/       # Reusable UI components
 │   │   │   ├── GraphPanel.vue          # D3-powered knowledge graph visualization
 │   │   │   ├── Step1GraphBuild.vue     # Upload docs + generate ontology + build graph
@@ -119,6 +120,8 @@ MiroFish/
 │   │   │   └── HistoryDatabase.vue     # History/project browser
 │   │   ├── store/
 │   │   │   └── pendingUpload.js        # Temporary upload state management
+│   │   ├── utils/
+│   │   │   └── sanitize.js             # DOMPurify-based HTML sanitization
 │   │   └── assets/                     # Logos and images
 │   └── vite.config.js
 │
@@ -126,7 +129,7 @@ MiroFish/
 │   ├── run.py                # Entry point: validates config, starts Flask on port 5001
 │   ├── pyproject.toml        # Python deps: flask, openai, zep-cloud, camel-oasis, PyMuPDF, pydantic
 │   ├── app/
-│   │   ├── __init__.py       # Flask app factory: CORS, blueprints, cleanup hooks
+│   │   ├── __init__.py       # Flask app factory: CORS, blueprints, security middleware (CSP, CSRF, rate limiting), cleanup hooks
 │   │   ├── config.py         # Centralized config from .env (LLM, Zep, OASIS, uploads)
 │   │   ├── auth/             # Authentication
 │   │   │   ├── oauth.py      # Google/GitHub OAuth2 provider registration
@@ -156,12 +159,13 @@ MiroFish/
 │   │   │   ├── zep_tools.py                 # Graph search tools: InsightForge, PanoramaSearch, QuickSearch
 │   │   │   └── report_agent.py              # ReACT-pattern report generation + conversational agent
 │   │   └── utils/
-│   │       ├── llm_client.py    # OpenAI-compatible LLM wrapper
-│   │       ├── file_parser.py   # PDF/MD/TXT text extraction (PyMuPDF)
-│   │       ├── paths.py         # User-scoped path helpers with traversal protection
-│   │       ├── zep_paging.py    # Paginated fetch for Zep nodes/edges
-│   │       ├── logger.py        # Structured logging setup
-│   │       └── retry.py         # Retry utilities
+│   │       ├── llm_client.py       # OpenAI-compatible LLM wrapper
+│   │       ├── file_parser.py      # PDF/MD/TXT text extraction (PyMuPDF)
+│   │       ├── input_validator.py  # Centralized input validation for API endpoints
+│   │       ├── paths.py            # User-scoped path helpers with traversal protection
+│   │       ├── zep_paging.py       # Paginated fetch for Zep nodes/edges
+│   │       ├── logger.py           # Structured logging setup
+│   │       └── retry.py            # Retry utilities
 │   ├── scripts/               # Standalone simulation runner scripts
 │   │   ├── run_twitter_simulation.py
 │   │   ├── run_reddit_simulation.py
