@@ -2,6 +2,31 @@
 
 All notable changes to MiroFish will be documented in this file.
 
+## [0.2.4.0] - 2026-03-30
+
+### Security
+- Cross-site form attacks blocked: CSRF checks no longer skip multipart/form-data requests
+- All API inputs now validated through a centralized `InputValidator` before processing
+- Content Security Policy enforced with per-request nonces for scripts and styles
+- Rate limiting protects login and sensitive endpoints from brute-force attempts
+- Full security header suite added: X-Content-Type-Options, X-Frame-Options, Referrer-Policy, Permissions-Policy
+- Cookies locked down: HttpOnly, Secure, SameSite=Lax flags on all session cookies
+- User-generated HTML sanitized with DOMPurify on the frontend to prevent stored XSS
+- Real API keys removed from `.env.example`
+
+## [0.2.3.0] - 2026-03-29
+
+### Fixed
+- Error banner now appears when project loading or graph generation fails, instead of failing silently
+- Unknown URLs now show a proper 404 page instead of a blank screen
+
+### Changed
+- Translated entire codebase from Chinese to English (63 files, ~14K lines)
+- All backend Python source: comments, docstrings, error messages, log messages, LLM prompts, variable names
+- All frontend Vue/JS source: UI labels, placeholder text, status messages, component comments
+- Configuration files: .env.example descriptions, Docker labels, package.json metadata
+- Resolved remaining Chinese language artifacts missed in initial translation pass
+
 ## [0.2.1.1] - 2026-03-28
 
 ### Fixed

@@ -1,5 +1,5 @@
 """
-MiroFish Backend - Flask应用工厂
+MiroFish Backend - Flask Application Factory
 """
 
 import os
@@ -9,12 +9,14 @@ import warnings
 from datetime import datetime, timezone
 from pathlib import Path
 
-# 抑制 multiprocessing resource_tracker 的警告（来自第三方库如 transformers）
-# 需要在所有其他导入之前设置
+# Suppress multiprocessing resource_tracker warnings (from third-party libraries like transformers)
+# Must be set before all other imports
 warnings.filterwarnings("ignore", message=".*resource_tracker.*")
 
 from flask import Flask, jsonify, request
 from flask_cors import CORS
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 from flask_login import LoginManager
 
 from .auth.oauth import init_oauth, validate_oauth_env
@@ -22,29 +24,36 @@ from .config import Config
 from .db import init_db
 from .utils.logger import setup_logger, get_logger
 
+# Module-level limiter for import by blueprints
+limiter = Limiter(
+    get_remote_address,
+    default_limits=["60 per minute"],
+    storage_uri="memory://",
+)
+
 
 def create_app(config_class=Config):
-    """Flask应用工厂函数"""
+    """Flask application factory function"""
     app = Flask(__name__)
     app.config.from_object(config_class)
     app.config['_START_TIME'] = time.monotonic()
 
-    # 设置JSON编码：确保中文直接显示（而不是 \uXXXX 格式）
-    # Flask >= 2.3 使用 app.json.ensure_ascii，旧版本使用 JSON_AS_ASCII 配置
+    # Set JSON encoding: ensure non-ASCII characters are displayed directly (not as \uXXXX)
+    # Flask >= 2.3 uses app.json.ensure_ascii, older versions use JSON_AS_ASCII config
     if hasattr(app, 'json') and hasattr(app.json, 'ensure_ascii'):
         app.json.ensure_ascii = False
     
-    # 设置日志
+    # Set up logging
     logger = setup_logger('mirofish')
     
-    # 只在 reloader 子进程中打印启动信息（避免 debug 模式下打印两次）
+    # Only print startup info in the reloader subprocess (avoid printing twice in debug mode)
     is_reloader_process = os.environ.get('WERKZEUG_RUN_MAIN') == 'true'
     debug_mode = app.config.get('DEBUG', False)
     should_log_startup = not debug_mode or is_reloader_process
     
     if should_log_startup:
         logger.info("=" * 50)
-        logger.info("MiroFish Backend 启动中...")
+        logger.info("MiroFish Backend starting...")
         logger.info("=" * 50)
     
     # Session configuration
@@ -53,7 +62,10 @@ def create_app(config_class=Config):
     app.config['SESSION_COOKIE_SECURE'] = not app.config.get('DEBUG', False)
     app.config['PERMANENT_SESSION_LIFETIME'] = 86400 * 7  # 7 days
 
-    # 启用CORS
+    # Rate limiting
+    limiter.init_app(app)
+
+    # Enable CORS
     frontend_origin = os.environ.get('FRONTEND_URL', 'http://localhost:3000')
     CORS(app, resources={r"/api/*": {"origins": [frontend_origin]}},
          supports_credentials=True)
@@ -66,12 +78,26 @@ def create_app(config_class=Config):
     if auth_enabled:
         validate_oauth_env()
         secret = app.config.get('SECRET_KEY', '')
-        if secret == 'mirofish-secret-key' or len(secret) < 32:
+        if len(secret) < 32:
             raise RuntimeError(
                 "AUTH_ENABLED=true but SECRET_KEY is missing or too short "
                 "(minimum 32 characters). "
                 "Set a strong SECRET_KEY in your .env file. "
                 "Generate one with: python -c \"import secrets; print(secrets.token_hex(32))\""
+            )
+    else:
+        if should_log_startup:
+            logger.warning(
+                "AUTH_ENABLED is false — all API endpoints are unauthenticated. "
+                "Set AUTH_ENABLED=true and configure OAuth credentials for production use."
+            )
+
+    if not os.environ.get('SECRET_KEY'):
+        if should_log_startup:
+            logger.warning(
+                "SECRET_KEY not set — using auto-generated key. "
+                "Sessions will not survive server restarts. "
+                "Set SECRET_KEY in .env for persistent sessions."
             )
 
     # Initialize OAuth providers
@@ -88,11 +114,11 @@ def create_app(config_class=Config):
         from .models.user import User
         return User.get_by_id(user_id)
     
-    # 注册模拟进程清理函数（确保服务器关闭时终止所有模拟进程）
+    # Register simulation process cleanup function (ensure all simulation processes are terminated on server shutdown)
     from .services.simulation_runner import SimulationRunner
     SimulationRunner.register_cleanup()
     if should_log_startup:
-        logger.info("已注册模拟进程清理函数")
+        logger.info("Simulation process cleanup function registered")
     
     # Auth middleware -- default-deny for protected routes
     @app.before_request
@@ -108,21 +134,54 @@ def create_app(config_class=Config):
         if not current_user.is_authenticated:
             return jsonify({'error': 'authentication_required'}), 401
 
-    # 请求日志中间件
+    # CSRF protection: require custom header on POST requests
+    # PUT/PATCH/DELETE always trigger CORS preflight (non-simple methods), so
+    # CORS + SameSite is sufficient. POST needs the extra check because HTML
+    # forms can send cross-origin POSTs without preflight.
+    @app.before_request
+    def csrf_check():
+        if request.method != 'POST':
+            return None
+        if request.path == '/health' or request.path.startswith('/api/auth/'):
+            return None
+        content_type = request.content_type or ''
+        has_custom_header = request.headers.get('X-Requested-With') == 'XMLHttpRequest'
+        is_json = 'application/json' in content_type
+        # Note: multipart/form-data is NOT checked here because it is a
+        # "simple" content type that HTML forms can send cross-origin
+        # without triggering CORS preflight.  The frontend axios client
+        # always sends X-Requested-With: XMLHttpRequest (even on multipart
+        # uploads), so has_custom_header covers that case.
+        if not (has_custom_header or is_json):
+            return jsonify({'error': 'Missing required request header'}), 403
+
+    # Request logging middleware
     @app.before_request
     def log_request():
         logger = get_logger('mirofish.request')
-        logger.debug(f"请求: {request.method} {request.path}")
+        logger.debug(f"Request: {request.method} {request.path}")
         if request.content_type and 'json' in request.content_type:
-            logger.debug(f"请求体: {request.get_json(silent=True)}")
-    
+            logger.debug(f"Request body: {request.get_json(silent=True)}")
+
     @app.after_request
-    def log_response(response):
+    def add_security_headers(response):
+        response.headers['X-Content-Type-Options'] = 'nosniff'
+        response.headers['X-Frame-Options'] = 'DENY'
+        response.headers['X-XSS-Protection'] = '0'
+        response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
+        response.headers['Content-Security-Policy'] = (
+            "default-src 'self'; "
+            "script-src 'self'; "
+            "style-src 'self' 'unsafe-inline'; "
+            "img-src 'self' data: blob:; "
+            f"connect-src 'self' {frontend_origin}; "
+            "frame-ancestors 'none'"
+        )
         logger = get_logger('mirofish.request')
-        logger.debug(f"响应: {response.status_code}")
+        logger.debug(f"Response: {response.status_code}")
         return response
-    
-    # 注册蓝图
+
+    # Register blueprints
     from .api import auth_bp, graph_bp, simulation_bp, report_bp
     app.register_blueprint(auth_bp, url_prefix='/api/auth')
     app.register_blueprint(graph_bp, url_prefix='/api/graph')
@@ -137,7 +196,7 @@ def create_app(config_class=Config):
     except Exception:
         app.config['_APP_VERSION'] = 'unknown'
 
-    # 健康检查
+    # Health check
     @app.route('/health')
     def health():
         elapsed = time.monotonic() - app.config['_START_TIME']
@@ -162,7 +221,7 @@ def create_app(config_class=Config):
         }
 
     if should_log_startup:
-        logger.info("MiroFish Backend 启动完成")
+        logger.info("MiroFish Backend startup complete")
 
     return app
 
